@@ -2,21 +2,70 @@
   "name": "midoo-books",
   "version": "0.1.0",
   "type": "module",
+  "main": "dist-electron/main.cjs",
   "scripts": {
-    "dev": "vite dev",
-    "build": "vite build",
-    "preview": "vite preview"
+    "dev:web": "vite dev --port 5173",
+    "build:electron": "node scripts/build-electron.mjs",
+    "dev:electron": "cross-env NODE_ENV=development electron .",
+    "dev": "npm run build:electron && concurrently -n \"web,electron\" -c \"cyan,yellow\" \"npm run dev:web\" \"wait-on http://localhost:5173 && npm run dev:electron\"",
+    "build": "vite build && npm run build:electron",
+    "dist": "npm run build && electron-builder --win",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.8",
     "@sveltejs/kit": "^2.16.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@types/node": "^20.17.0",
+    "@types/sql.js": "^1.4.9",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "esbuild": "^0.21.5",
+    "electron": "^31.7.6",
+    "electron-builder": "^25.1.8",
     "svelte": "^5.25.0",
-    "vite": "^6.2.0"
+    "typescript": "^5.8.3",
+    "vite": "^6.2.0",
+    "wait-on": "^8.0.1"
   },
   "dependencies": {
     "gray-matter": "^4.0.3",
     "marked": "^13.0.3",
-    "pagedjs": "^0.4.3"
+    "pagedjs": "^0.4.3",
+    "sql.js": "^1.12.0"
+  },
+  "build": {
+    "appId": "com.midoo.books",
+    "productName": "MIDOO Books",
+    "copyright": "Copyright © 2026 MIDOO",
+    "files": [
+      "build/**/*",
+      "dist-electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "content",
+        "to": "content"
+      },
+      {
+        "from": "node_modules/sql.js/dist",
+        "to": "sql.js/dist",
+        "filter": ["sql-wasm.wasm"]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

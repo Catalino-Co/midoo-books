@@ -1,0 +1,13 @@
+{
+  "extends": "./.svelte-kit/tsconfig.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "strict": true,
+    "noImplicitAny": true,
+    "skipLibCheck": true,
+    "types": ["@types/node"]
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "build", "dist-electron", "electron"]
+}

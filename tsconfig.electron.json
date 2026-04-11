@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "lib": ["ES2020"],
+    "strict": true,
+    "noImplicitAny": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "sourceMap": true,
+    "types": ["@types/node", "@types/sql.js"]
+  },
+  "include": [
+    "electron/**/*.ts",
+    "src/lib/core/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist-electron", "src/lib/persistence", "src/routes"]
+}

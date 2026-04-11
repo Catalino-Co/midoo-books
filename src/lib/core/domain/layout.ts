@@ -1,0 +1,109 @@
+/**
+ * src/lib/core/domain/layout.ts
+ *
+ * Entidad LayoutSettings.
+ *
+ * Configuración de diseño tipográfico y de maquetación asociada a un BookProject.
+ * Hay exactamente un LayoutSettings por libro.
+ *
+ * Unidades de medida: mm (milímetros) para dimensiones físicas.
+ * Unidades tipográficas: pt (puntos tipográficos) para fuentes y espaciados.
+ */
+
+declare const LayoutSettingsIdBrand: unique symbol;
+export type LayoutSettingsId = string & { readonly [LayoutSettingsIdBrand]: never };
+
+// ─── Enumeraciones ────────────────────────────────────────────────────────────
+
+export type PageUnit = 'mm' | 'in' | 'pt' | 'px';
+
+/**
+ * Modo de numeración de páginas visible al lector.
+ * - none:     Sin numeración
+ * - arabic:   1, 2, 3 ... (cuerpo principal)
+ * - roman:    i, ii, iii ... (frontmatter)
+ */
+export type NumberingStyle = 'none' | 'arabic' | 'roman';
+
+// ─── Entidad LayoutSettings ───────────────────────────────────────────────────
+
+export interface LayoutSettings {
+  id:                       LayoutSettingsId;
+  bookId:                   string;             // FK → BookProject.id (1:1)
+
+  // ── Dimensiones de página ────────────────────────────────────────────────
+  pageWidth:                number;             // En la unidad indicada por pageUnit
+  pageHeight:               number;
+  pageUnit:                 PageUnit;           // Unidad de las dimensiones
+
+  // ── Márgenes ─────────────────────────────────────────────────────────────
+  marginTop:                number;
+  marginBottom:             number;
+  marginInside:             number;             // Interior (lomo) en doble cara
+  marginOutside:            number;             // Exterior (corte)
+  facingPages:              boolean;            // ¿Márgenes espejo para doble cara?
+
+  // ── Tipografía cuerpo ────────────────────────────────────────────────────
+  bodyFontFamily:           string;             // Nombre de familia tipográfica
+  headingFontFamily:        string;
+  bodyFontSize:             number;             // En puntos (pt)
+  bodyLineHeight:           number;             // Multiplicador (ej. 1.4)
+  paragraphSpacing:         number;             // Espacio entre párrafos (pt)
+  firstLineIndent:          number;             // Sangría de primera línea (mm)
+
+  // ── Numeración ────────────────────────────────────────────────────────────
+  pageNumberMode:           'none' | 'continuous' | 'per_section';
+  pageNumberStart:          number;             // Número inicial del cuerpo principal
+  frontmatterNumberingStyle: NumberingStyle;    // Estilo para páginas preliminares
+  bodyNumberingStyle:       NumberingStyle;     // Estilo para el cuerpo
+
+  // ── Cabeceras y pies ─────────────────────────────────────────────────────
+  showHeader:               boolean;
+  showFooter:               boolean;
+  headerConfigJson:         string | null;      // JSON de configuración de cabecera
+  footerConfigJson:         string | null;      // JSON de configuración de pie
+
+  // ── TOC ───────────────────────────────────────────────────────────────────
+  tocConfigJson:            string | null;      // JSON de configuración del TOC
+
+  createdAt:                string;
+  updatedAt:                string;
+}
+
+// ─── Payloads ─────────────────────────────────────────────────────────────────
+
+export type CreateLayoutSettingsInput = Omit<LayoutSettings,
+  'id' | 'createdAt' | 'updatedAt'
+>;
+
+export type UpdateLayoutSettingsInput = Partial<Omit<LayoutSettings,
+  'id' | 'bookId' | 'createdAt' | 'updatedAt'
+>>;
+
+// ─── Preset por defecto (A5) ──────────────────────────────────────────────────
+
+export const DEFAULT_LAYOUT_SETTINGS: Omit<LayoutSettings, 'id' | 'bookId' | 'createdAt' | 'updatedAt'> = {
+  pageWidth:                148,       // A5 ancho en mm
+  pageHeight:               210,       // A5 alto en mm
+  pageUnit:                 'mm',
+  marginTop:                20,
+  marginBottom:             22,
+  marginInside:             22,
+  marginOutside:            18,
+  facingPages:              true,
+  bodyFontFamily:           'Georgia, serif',
+  headingFontFamily:        'Helvetica Neue, Arial, sans-serif',
+  bodyFontSize:             11,
+  bodyLineHeight:           1.5,
+  paragraphSpacing:         6,
+  firstLineIndent:          5,
+  pageNumberMode:           'continuous',
+  pageNumberStart:          1,
+  frontmatterNumberingStyle:'roman',
+  bodyNumberingStyle:       'arabic',
+  showHeader:               true,
+  showFooter:               true,
+  headerConfigJson:         null,
+  footerConfigJson:         null,
+  tocConfigJson:            null,
+};
