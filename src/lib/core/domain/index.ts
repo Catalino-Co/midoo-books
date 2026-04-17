@@ -39,7 +39,12 @@ export type {
   CreateBlockInput,
   UpdateBlockInput,
 } from './block';
-export { asBlockId } from './block';
+export {
+  asBlockId,
+  BLOCK_TYPE_VALUES,
+  normalizeBlockType,
+  DEFAULT_BLOCK_TYPE,
+} from './block';
 
 // ── Layout ────────────────────────────────────────────────────────────────────
 export type {

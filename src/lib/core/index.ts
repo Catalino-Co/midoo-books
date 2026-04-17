@@ -71,6 +71,9 @@ export {
   normalizeSectionType,
   DEFAULT_SECTION_TYPE,
   asBlockId,
+  BLOCK_TYPE_VALUES,
+  normalizeBlockType,
+  DEFAULT_BLOCK_TYPE,
   asAssetId,
   DEFAULT_LAYOUT_SETTINGS,
 } from './domain/index';

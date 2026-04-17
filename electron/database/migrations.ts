@@ -14,6 +14,7 @@
  *                document_blocks, layout_settings, assets, snapshots, export_jobs)
  *   v3 — Tipos de sección ampliados; tabla document_sections sin CHECK en section_type
  *   v4 — Valores section_type normalizados a SCREAMING_SNAKE_CASE (p. ej. CHAPTER)
+ *   v5 — Tipos de bloque v1; document_blocks sin CHECK en block_type; datos migrados
  */
 
 import type { Database } from 'sql.js';
@@ -367,6 +368,81 @@ const migrations: Migration[] = [
       `);
 
       console.log('[DB] v4: section_type normalizado a valores canónicos.');
+    },
+  },
+
+  // ─── v5: Tipos de bloque editor v1 (SCREAMING_SNAKE_CASE) ─────────────────
+  {
+    version: 5,
+    name: 'block_types_editor_v1',
+    up(db) {
+      db.run('ALTER TABLE document_blocks RENAME TO _bkp_document_blocks_v5');
+
+      db.run(`
+        CREATE TABLE document_blocks (
+          id                TEXT PRIMARY KEY,
+          section_id        TEXT NOT NULL REFERENCES document_sections(id) ON DELETE CASCADE,
+          block_type        TEXT NOT NULL DEFAULT 'PARAGRAPH',
+          order_index       INTEGER NOT NULL DEFAULT 0,
+          content_text      TEXT NOT NULL DEFAULT '',
+          content_json      TEXT,
+          style_variant     TEXT NOT NULL DEFAULT 'default'
+            CHECK(style_variant IN (
+              'default','lead','caption','footnote','pull_quote','code_inline'
+            )),
+          include_in_toc    INTEGER NOT NULL DEFAULT 0,
+          keep_together     INTEGER NOT NULL DEFAULT 0,
+          page_break_before INTEGER NOT NULL DEFAULT 0,
+          page_break_after  INTEGER NOT NULL DEFAULT 0,
+          metadata_json     TEXT,
+          created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+
+      db.run(`
+        INSERT INTO document_blocks
+          (id, section_id, block_type, order_index, content_text, content_json,
+           style_variant, include_in_toc, keep_together,
+           page_break_before, page_break_after, metadata_json, created_at, updated_at)
+        SELECT
+          id, section_id,
+          CASE lower(block_type)
+            WHEN 'paragraph' THEN 'PARAGRAPH'
+            WHEN 'heading' THEN 'HEADING_1'
+            WHEN 'heading_1' THEN 'HEADING_1'
+            WHEN 'heading_2' THEN 'HEADING_2'
+            WHEN 'image' THEN 'IMAGE'
+            WHEN 'table' THEN 'PARAGRAPH'
+            WHEN 'quote' THEN 'QUOTE'
+            WHEN 'code' THEN 'PARAGRAPH'
+            WHEN 'divider' THEN 'SEPARATOR'
+            WHEN 'separator' THEN 'SEPARATOR'
+            WHEN 'list' THEN 'PARAGRAPH'
+            WHEN 'raw_html' THEN 'PARAGRAPH'
+            WHEN 'page_break' THEN 'PAGE_BREAK'
+            WHEN 'centered_phrase' THEN 'CENTERED_PHRASE'
+            ELSE block_type
+          END,
+          order_index, content_text, content_json, style_variant, include_in_toc, keep_together,
+          page_break_before, page_break_after, metadata_json, created_at, updated_at
+        FROM _bkp_document_blocks_v5
+      `);
+
+      db.run('DROP TABLE _bkp_document_blocks_v5');
+
+      db.run(`
+        CREATE INDEX IF NOT EXISTS idx_blocks_section_id
+        ON document_blocks(section_id, order_index)
+      `);
+
+      db.run(`
+        INSERT OR REPLACE INTO app_settings (key, value) VALUES
+          ('appVersion',    '0.4.0'),
+          ('schemaVersion', '5')
+      `);
+
+      console.log('[DB] v5: document_blocks migrada a tipos editor v1.');
     },
   },
 
