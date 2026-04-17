@@ -34,6 +34,7 @@
     type MarkdownImportPreview,
   } from '$lib/services/content.service';
   import SectionTypeSelect from '$lib/components/SectionTypeSelect.svelte';
+  import BookMarkdownImportModal from '$lib/components/BookMarkdownImportModal.svelte';
   import type {
     DocumentSection, SectionType,
     DocumentBlock,   BlockType, BlockStyleVariant,
@@ -79,6 +80,9 @@
   let mdImportError          = $state<string | null>(null);
   let mdImporting            = $state(false);
   let mdFileInput            = $state<HTMLInputElement | null>(null);
+
+  // Importación manuscrito Markdown — libro completo (PARTE 6B)
+  let showBookMarkdownImport = $state(false);
 
   // Confirmación de borrado
   let confirmDeleteSection   = $state<DocumentSection | null>(null);
@@ -502,6 +506,18 @@
     input.value = '';
   }
 
+  async function onBookMarkdownImported() {
+    await flushInspectorIfNeeded();
+    selectedSectionId = null;
+    selectedBlockId   = null;
+    await loadSections();
+    if (sections.length > 0) {
+      await selectSection(sections[0].id);
+    } else {
+      blocks = [];
+    }
+  }
+
   async function confirmMdImport() {
     if (!selectedSectionId || mdImporting) return;
     const v = validateMarkdownForImport(mdImportText);
@@ -823,6 +839,8 @@
   </div>
 {/if}
 
+<BookMarkdownImportModal bind:open={showBookMarkdownImport} bookId={bookId} onImported={onBookMarkdownImported} />
+
 <!-- ── Página principal ─────────────────────────────────────────────────── -->
 <div class="content-page">
 
@@ -838,13 +856,23 @@
   <aside class="panel panel--sections">
     <div class="panel-header">
       <span class="panel-title">Estructura</span>
-      <button
-        class="icon-btn icon-btn--accent"
-        title="Nueva sección"
-        onclick={openNewSectionModal}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-      </button>
+      <div class="panel-header-actions">
+        <button
+          type="button"
+          class="btn btn--sm btn--ghost"
+          title="Importar manuscrito Markdown (varias secciones)"
+          onclick={() => (showBookMarkdownImport = true)}
+        >
+          MD libro
+        </button>
+        <button
+          class="icon-btn icon-btn--accent"
+          title="Nueva sección"
+          onclick={openNewSectionModal}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+      </div>
     </div>
 
     <div class="panel-body panel-body--scroll">
@@ -1435,6 +1463,13 @@
     border-bottom: 1px solid rgba(255,255,255,0.06);
     flex-shrink: 0;
     gap: 8px;
+  }
+
+  .panel-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
   }
 
   .panel-title {

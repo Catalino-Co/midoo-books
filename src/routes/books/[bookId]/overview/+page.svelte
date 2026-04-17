@@ -6,6 +6,7 @@
     getBook, updateBook, deleteBook,
     statusLabel, statusColor, formatDate,
   } from '$lib/services/books.service';
+  import BookMarkdownImportModal from '$lib/components/BookMarkdownImportModal.svelte';
   import type { BookProject, BookStatus } from '$lib/core/domain/index';
 
   // ── Estado ────────────────────────────────────────────────────────────────
@@ -29,6 +30,10 @@
   // Estado de borrado
   let confirmDelete = $state(false);
   let deleting      = $state(false);
+
+  // Importación manuscrito Markdown (PARTE 6B)
+  let showBookMarkdownImport = $state(false);
+  let bookImportNotice       = $state<string | null>(null);
 
   // Detección de cambios
   let isDirty = $derived(
@@ -106,6 +111,13 @@
     if (book) syncFormToBook(book);
   }
 
+  function onBookMarkdownImported() {
+    bookImportNotice = 'Manuscrito importado. Puedes revisar la estructura en Contenido.';
+    setTimeout(() => {
+      bookImportNotice = null;
+    }, 5000);
+  }
+
   // ── Eliminar ──────────────────────────────────────────────────────────────
   async function handleDelete() {
     if (deleting) return;
@@ -126,6 +138,8 @@
 </svelte:head>
 
 <!-- ── Confirmación de borrado ─────────────────────────────────────────────── -->
+<BookMarkdownImportModal bind:open={showBookMarkdownImport} {bookId} onImported={onBookMarkdownImported} />
+
 {#if confirmDelete}
   <div class="overlay" role="dialog" aria-modal="true">
     <div class="dialog">
@@ -189,6 +203,9 @@
   <!-- Feedback de guardado -->
   {#if saveError}
     <div class="alert alert--error">{saveError}</div>
+  {/if}
+  {#if bookImportNotice}
+    <div class="alert alert--success">{bookImportNotice}</div>
   {/if}
   {#if isDirty && !saving}
     <div class="alert alert--info">Tienes cambios sin guardar.</div>
@@ -304,6 +321,23 @@
           </div>
         </section>
 
+        <!-- ── Manuscrito Markdown ─────────────────────────────────────────── -->
+        <section class="form-section">
+          <h2 class="form-section-title">Manuscrito</h2>
+          <p class="import-manuscript-lead">
+            Importa un Markdown estructurado con <code class="import-code"># Título de sección</code> por cada parte
+            del libro. El contenido bajo cada <code class="import-code">#</code> se convierte en bloques (mismas reglas
+            que la importación por sección). Puedes añadir al final o reemplazar todas las secciones existentes.
+          </p>
+          <button
+            type="button"
+            class="btn btn--ghost btn--sm"
+            onclick={() => (showBookMarkdownImport = true)}
+          >
+            Importar manuscrito Markdown
+          </button>
+        </section>
+
         <!-- ── Sección: Información del sistema ───────────────────────────── -->
         <section class="form-section">
           <h2 class="form-section-title">Información del sistema</h2>
@@ -404,6 +438,29 @@
     background: rgba(122,184,232,0.07);
     border-color: rgba(122,184,232,0.15);
     color: rgba(122,184,232,0.8);
+  }
+
+  .alert--success {
+    background: rgba(80, 180, 120, 0.1);
+    border-color: rgba(80, 200, 130, 0.22);
+    color: rgba(140, 220, 170, 0.95);
+  }
+
+  .import-manuscript-lead {
+    font-size: 13px;
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.45);
+    margin: 0;
+    max-width: 52rem;
+  }
+
+  .import-code {
+    font-family: ui-monospace, 'Cascadia Code', 'Segoe UI Mono', monospace;
+    font-size: 0.88em;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.07);
+    color: rgba(200, 220, 255, 0.92);
   }
 
   /* ── Body ─────────────────────────────────────────────────────────────────── */

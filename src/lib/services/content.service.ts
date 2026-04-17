@@ -32,11 +32,15 @@ export {
   type SectionCreationDefaults,
 } from '$lib/core/editorial/section-type-catalog';
 
-import { sectionTypeLabel } from '$lib/core/editorial/section-type-catalog';
+import { getSectionCreationDefaults, sectionTypeLabel } from '$lib/core/editorial/section-type-catalog';
 import {
   parseMarkdownToBlockDrafts,
   validateMarkdownForImport,
 } from '$lib/core/editorial/markdown-to-blocks';
+import {
+  parseMarkdownBookToSectionDrafts,
+  validateMarkdownBookForImport,
+} from '$lib/core/editorial/markdown-book-import';
 
 export {
   parseMarkdownToBlockDrafts,
@@ -45,6 +49,18 @@ export {
   type MarkdownBlockDraft,
   type MarkdownImportPreview,
 } from '$lib/core/editorial/markdown-to-blocks';
+
+export {
+  segmentMarkdownBookByH1,
+  parseMarkdownBookToSectionDrafts,
+  validateMarkdownBookForImport,
+  buildMarkdownBookImportPreview,
+  type MarkdownBookSectionDraft,
+  type BookMarkdownImportPreview,
+  type BookMarkdownImportPreviewSectionRow,
+} from '$lib/core/editorial/markdown-book-import';
+
+export { inferSectionTypeFromTitle } from '$lib/core/editorial/section-title-heuristic';
 
 // ─── Secciones ────────────────────────────────────────────────────────────────
 
@@ -158,6 +174,54 @@ export async function deleteBlock(id: string): Promise<boolean> {
 }
 
 export type MarkdownImportMode = 'append' | 'replace';
+
+export type MarkdownBookImportMode = 'append' | 'replace';
+
+/**
+ * Importa un manuscrito Markdown completo: segmenta por `#`, crea secciones y bloques.
+ * `replace` elimina todas las secciones actuales del libro (y sus bloques en cascada) antes de insertar.
+ */
+export async function importMarkdownBook(
+  bookId: string,
+  markdown: string,
+  mode: MarkdownBookImportMode,
+  currentSections: DocumentSection[],
+): Promise<DocumentSection[]> {
+  const v = validateMarkdownBookForImport(markdown);
+  if (!v.ok) throw new Error(v.message);
+
+  const drafts = parseMarkdownBookToSectionDrafts(markdown);
+  if (drafts.length === 0) {
+    throw new Error('No se pudo extraer ninguna sección del Markdown.');
+  }
+
+  if (mode === 'replace') {
+    const sorted = [...currentSections].sort((a, b) => a.orderIndex - b.orderIndex);
+    for (const s of sorted) {
+      await deleteSection(s.id);
+    }
+  }
+
+  for (const d of drafts) {
+    const defaults = getSectionCreationDefaults(d.sectionType);
+    const section = await createSection({
+      bookId,
+      sectionType:      d.sectionType,
+      title:            d.title,
+      includeInToc:     defaults.includeInToc,
+      startOnRightPage: defaults.startOnRightPage,
+    });
+    for (const b of d.blockDrafts) {
+      await createBlock({
+        sectionId:   section.id,
+        blockType:   b.blockType,
+        contentText: b.contentText,
+      });
+    }
+  }
+
+  return listSections(bookId);
+}
 
 /**
  * Importa Markdown en una sección: parsea, opcionalmente borra bloques existentes
