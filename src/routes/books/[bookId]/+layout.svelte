@@ -42,7 +42,7 @@
   // ── Módulos de navegación ─────────────────────────────────────────────────
   const modules = [
     { id: 'overview', label: 'Descripción',  icon: '📋', implemented: true },
-    { id: 'content',  label: 'Contenido',    icon: '✏️',  implemented: false },
+    { id: 'content',  label: 'Contenido',    icon: '✏️',  implemented: true },
     { id: 'assets',   label: 'Assets',       icon: '🖼️',  implemented: false },
     { id: 'styles',   label: 'Estilos',      icon: '🎨',  implemented: false },
     { id: 'layout',   label: 'Maqueta',      icon: '📐',  implemented: false },
@@ -302,7 +302,9 @@
   /* ── Main content ─────────────────────────────────────────────────────────── */
   .book-main {
     flex: 1;
-    overflow-y: auto;
+    /* overflow-y: auto solo para rutas que no manejan su propio scroll interno
+       (overview, stubs). El módulo Content gestiona su propio scroll por panel. */
+    overflow: hidden;
     display: flex;
     flex-direction: column;
     min-width: 0;

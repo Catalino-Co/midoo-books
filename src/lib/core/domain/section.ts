@@ -6,6 +6,9 @@
  * Una sección es la unidad organizativa de un libro: portada, índice,
  * capítulos, apéndices. Cada sección puede contener uno o más DocumentBlock.
  * Las secciones de un libro están ordenadas por orderIndex.
+ *
+ * Los valores de SectionType usan SCREAMING_SNAKE_CASE (p. ej. COVER, CHAPTER).
+ * Los datos antiguos en minúsculas o alias legacy se normalizan al leer desde SQLite.
  */
 
 // ─── Identificador ────────────────────────────────────────────────────────────
@@ -20,33 +23,79 @@ export function asSectionId(id: string): SectionId {
 // ─── Tipos de sección ─────────────────────────────────────────────────────────
 
 /**
- * Tipos de sección predefinidos.
- * - cover:         Portada del libro
- * - blank:         Página en blanco (recto/verso)
- * - title_page:    Página de título (título, subtítulo, autor)
- * - copyright:     Página de derechos y créditos
- * - dedication:    Dedicatoria
- * - toc:           Tabla de contenidos (generada automáticamente)
- * - preface:       Prefacio / prólogo
- * - chapter:       Capítulo numerado (el más común)
- * - appendix:      Apéndice
- * - bibliography:  Bibliografía
- * - index:         Índice analítico
- * - colophon:      Colofón / datos de impresión
+ * Valores canónicos de tipo de sección (almacenamiento + dominio).
+ * Mantener sincronizado con `section-type-catalog.ts` y migraciones de BD.
  */
-export type SectionType =
-  | 'cover'
-  | 'blank'
-  | 'title_page'
-  | 'copyright'
-  | 'dedication'
-  | 'toc'
-  | 'preface'
-  | 'chapter'
-  | 'appendix'
-  | 'bibliography'
-  | 'index'
-  | 'colophon';
+export const SECTION_TYPE_VALUES = [
+  'COVER',
+  'BACK_COVER',
+  'BLANK',
+  'TITLE_PAGE',
+  'CREDITS',
+  'RIGHTS',
+  'DEDICATION',
+  'TOC',
+  'PREFACE',
+  'PROLOGUE',
+  'CHAPTER',
+  'EPILOGUE',
+  'APPENDIX',
+  'AUTHOR_NOTE',
+  'BIBLIOGRAPHY',
+  'INDEX_ANALYTICAL',
+  'COLOPHON',
+  'SPECIAL',
+] as const;
+
+export type SectionType = (typeof SECTION_TYPE_VALUES)[number];
+
+const _canonicalSet = new Set<string>(SECTION_TYPE_VALUES);
+
+/** Tipo por defecto al crear contenido nuevo o si llega un valor desconocido. */
+export const DEFAULT_SECTION_TYPE: SectionType = 'CHAPTER';
+
+/**
+ * Convierte texto persistido (minúsculas, legacy) al SectionType canónico.
+ *
+ * Legacy:
+ *   copyright → RIGHTS
+ *   index     → INDEX_ANALYTICAL
+ */
+export function normalizeSectionType(raw: string): SectionType {
+  const key = raw.trim().toLowerCase();
+  const legacy: Record<string, SectionType> = {
+    copyright: 'RIGHTS',
+    index: 'INDEX_ANALYTICAL',
+  };
+  if (legacy[key]) return legacy[key];
+
+  const fromLower: Record<string, SectionType> = {
+    cover: 'COVER',
+    back_cover: 'BACK_COVER',
+    blank: 'BLANK',
+    title_page: 'TITLE_PAGE',
+    credits: 'CREDITS',
+    rights: 'RIGHTS',
+    dedication: 'DEDICATION',
+    toc: 'TOC',
+    preface: 'PREFACE',
+    prologue: 'PROLOGUE',
+    chapter: 'CHAPTER',
+    epilogue: 'EPILOGUE',
+    appendix: 'APPENDIX',
+    author_note: 'AUTHOR_NOTE',
+    bibliography: 'BIBLIOGRAPHY',
+    index_analytical: 'INDEX_ANALYTICAL',
+    colophon: 'COLOPHON',
+    special: 'SPECIAL',
+  };
+  if (fromLower[key]) return fromLower[key];
+
+  const trimmed = raw.trim();
+  if (_canonicalSet.has(trimmed)) return trimmed as SectionType;
+
+  return DEFAULT_SECTION_TYPE;
+}
 
 // ─── Entidad DocumentSection ──────────────────────────────────────────────────
 

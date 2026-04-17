@@ -23,7 +23,12 @@ export type {
   CreateSectionInput,
   UpdateSectionInput,
 } from './section';
-export { asSectionId } from './section';
+export {
+  asSectionId,
+  SECTION_TYPE_VALUES,
+  normalizeSectionType,
+  DEFAULT_SECTION_TYPE,
+} from './section';
 
 // ── Bloque ────────────────────────────────────────────────────────────────────
 export type {

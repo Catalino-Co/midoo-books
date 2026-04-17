@@ -12,6 +12,8 @@
  *   v1 — Fase 1: app_settings, books (legacy minimal)
  *   v2 — Fase 2: dominio editorial completo (book_projects, document_sections,
  *                document_blocks, layout_settings, assets, snapshots, export_jobs)
+ *   v3 — Tipos de sección ampliados; tabla document_sections sin CHECK en section_type
+ *   v4 — Valores section_type normalizados a SCREAMING_SNAKE_CASE (p. ej. CHAPTER)
  */
 
 import type { Database } from 'sql.js';
@@ -254,6 +256,117 @@ const migrations: Migration[] = [
       `);
 
       console.log('[DB] Dominio editorial creado: 6 tablas nuevas.');
+    },
+  },
+
+  // ─── v3: Ampliar tipos de sección (Fase 4) ───────────────────────────────
+  // El CHECK constraint original de document_sections solo admitía 12 tipos.
+  // SQLite no permite ALTER TABLE ... MODIFY CONSTRAINT, así que recreamos
+  // la tabla preservando todos los datos existentes.
+  //
+  // Tipos nuevos:  back_cover, credits, rights, prologue, epilogue,
+  //                author_note, index_analytical, special
+  // Tipos legacy que se conservan: copyright (→ rights), index (→ index_analytical)
+  //
+  // Estrategia:
+  //   1. Renombrar tabla original a backup
+  //   2. Crear nueva tabla SIN CHECK constraint (la validación queda en TypeScript)
+  //   3. Copiar datos
+  //   4. Eliminar backup
+  //   5. Recrear índice
+  {
+    version: 3,
+    name: 'expand_section_types',
+    up(db) {
+      // Paso 1: Renombrar la tabla existente
+      db.run('ALTER TABLE document_sections RENAME TO _bkp_document_sections_v2');
+
+      // Paso 2: Crear la nueva tabla sin CHECK en section_type
+      // La validación de valores permitidos se garantiza en la capa TypeScript.
+      db.run(`
+        CREATE TABLE document_sections (
+          id                  TEXT PRIMARY KEY,
+          book_id             TEXT NOT NULL REFERENCES book_projects(id) ON DELETE CASCADE,
+          section_type        TEXT NOT NULL DEFAULT 'chapter',
+          title               TEXT NOT NULL DEFAULT '',
+          order_index         INTEGER NOT NULL DEFAULT 0,
+          include_in_toc      INTEGER NOT NULL DEFAULT 1,
+          start_on_right_page INTEGER NOT NULL DEFAULT 0,
+          settings_json       TEXT,
+          created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+
+      // Paso 3: Copiar todos los datos existentes
+      db.run(`
+        INSERT INTO document_sections
+          (id, book_id, section_type, title, order_index,
+           include_in_toc, start_on_right_page, settings_json, created_at, updated_at)
+        SELECT
+          id, book_id, section_type, title, order_index,
+          include_in_toc, start_on_right_page, settings_json, created_at, updated_at
+        FROM _bkp_document_sections_v2
+      `);
+
+      // Paso 4: Eliminar la tabla de respaldo
+      db.run('DROP TABLE _bkp_document_sections_v2');
+
+      // Paso 5: Recrear el índice compuesto
+      db.run(`
+        CREATE INDEX IF NOT EXISTS idx_sections_book_id
+        ON document_sections(book_id, order_index)
+      `);
+
+      // Actualizar versión
+      db.run(`
+        INSERT OR REPLACE INTO app_settings (key, value) VALUES
+          ('appVersion',    '0.3.0'),
+          ('schemaVersion', '3')
+      `);
+
+      console.log('[DB] v3: document_sections recreada con tipos de sección expandidos.');
+    },
+  },
+
+  // ─── v4: Almacenamiento canónico de section_type (SCREAMING_SNAKE_CASE) ──
+  {
+    version: 4,
+    name: 'canonical_section_type_storage',
+    up(db) {
+      db.run(`
+        UPDATE document_sections SET section_type = CASE lower(section_type)
+          WHEN 'cover' THEN 'COVER'
+          WHEN 'back_cover' THEN 'BACK_COVER'
+          WHEN 'blank' THEN 'BLANK'
+          WHEN 'title_page' THEN 'TITLE_PAGE'
+          WHEN 'credits' THEN 'CREDITS'
+          WHEN 'rights' THEN 'RIGHTS'
+          WHEN 'dedication' THEN 'DEDICATION'
+          WHEN 'toc' THEN 'TOC'
+          WHEN 'preface' THEN 'PREFACE'
+          WHEN 'prologue' THEN 'PROLOGUE'
+          WHEN 'chapter' THEN 'CHAPTER'
+          WHEN 'epilogue' THEN 'EPILOGUE'
+          WHEN 'appendix' THEN 'APPENDIX'
+          WHEN 'author_note' THEN 'AUTHOR_NOTE'
+          WHEN 'bibliography' THEN 'BIBLIOGRAPHY'
+          WHEN 'index_analytical' THEN 'INDEX_ANALYTICAL'
+          WHEN 'colophon' THEN 'COLOPHON'
+          WHEN 'special' THEN 'SPECIAL'
+          WHEN 'copyright' THEN 'RIGHTS'
+          WHEN 'index' THEN 'INDEX_ANALYTICAL'
+          ELSE section_type
+        END
+      `);
+
+      db.run(`
+        INSERT OR REPLACE INTO app_settings (key, value) VALUES
+          ('appVersion',    '0.3.1'),
+          ('schemaVersion', '4')
+      `);
+
+      console.log('[DB] v4: section_type normalizado a valores canónicos.');
     },
   },
 

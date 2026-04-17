@@ -14,6 +14,7 @@ import type {
   UpdateSectionInput,
 } from '../../../src/lib/core/domain/section';
 import { asSectionId } from '../../../src/lib/core/domain/section';
+import { getSectionCreationDefaults } from '../../../src/lib/core/editorial/section-type-catalog';
 import { rowToDocumentSection, queryResultToObjects } from '../mappers/section.mapper';
 import { getDatabase, persist } from '../connection';
 
@@ -40,6 +41,14 @@ export function createSection(input: CreateSectionInput): DocumentSection {
     orderIndex = Number(result[0]?.values[0]?.[0] ?? 0);
   }
 
+  const editorialDefaults = getSectionCreationDefaults(input.sectionType);
+  const includeInToc =
+    input.includeInToc !== undefined ? input.includeInToc : editorialDefaults.includeInToc;
+  const startOnRightPage =
+    input.startOnRightPage !== undefined
+      ? input.startOnRightPage
+      : editorialDefaults.startOnRightPage;
+
   db().run(
     `INSERT INTO document_sections
        (id, book_id, section_type, title, order_index,
@@ -51,8 +60,8 @@ export function createSection(input: CreateSectionInput): DocumentSection {
       input.sectionType,
       input.title,
       orderIndex,
-      input.includeInToc    !== undefined ? (input.includeInToc    ? 1 : 0) : 1,
-      input.startOnRightPage !== undefined ? (input.startOnRightPage ? 1 : 0) : 0,
+      includeInToc ? 1 : 0,
+      startOnRightPage ? 1 : 0,
       input.settingsJson ?? null,
       ts,
       ts,

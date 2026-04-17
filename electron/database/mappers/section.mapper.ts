@@ -4,8 +4,8 @@
  * Convierte entre filas de SQLite y entidades DocumentSection del dominio.
  */
 
-import type { DocumentSection, SectionType } from '../../../src/lib/core/domain/section';
-import { asSectionId } from '../../../src/lib/core/domain/section';
+import type { DocumentSection } from '../../../src/lib/core/domain/section';
+import { asSectionId, normalizeSectionType, DEFAULT_SECTION_TYPE } from '../../../src/lib/core/domain/section';
 import type { SqlValue } from 'sql.js';
 import { queryResultToObjects } from './book.mapper';
 
@@ -15,7 +15,7 @@ export function rowToDocumentSection(row: Record<string, SqlValue>): DocumentSec
   return {
     id:               asSectionId(String(row.id ?? '')),
     bookId:           String(row.book_id ?? ''),
-    sectionType:      (String(row.section_type ?? 'chapter')) as SectionType,
+    sectionType:      normalizeSectionType(String(row.section_type ?? DEFAULT_SECTION_TYPE)),
     title:            String(row.title ?? ''),
     orderIndex:       Number(row.order_index ?? 0),
     includeInToc:     Number(row.include_in_toc ?? 1) === 1,
