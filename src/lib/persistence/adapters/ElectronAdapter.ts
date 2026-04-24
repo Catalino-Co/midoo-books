@@ -15,6 +15,8 @@ import type {
   BookProject,
   CreateBookProjectInput,
   UpdateBookProjectInput,
+  LayoutSettings,
+  UpdateLayoutSettingsInput,
   DocumentSection,
   CreateSectionInput,
   UpdateSectionInput,
@@ -83,6 +85,19 @@ export class ElectronAdapter implements IPlatformAdapter {
   async deleteBook(id: string): Promise<boolean> {
     const res = unwrap(await this.api.books.delete(id));
     return (res as { deleted: boolean }).deleted;
+  }
+
+  async getLayoutSettingsByBookId(bookId: string): Promise<LayoutSettings> {
+    return unwrap(await this.api.layout.getByBookId(bookId));
+  }
+
+  async updateLayoutSettingsByBookId(
+    bookId: string,
+    input: UpdateLayoutSettingsInput,
+  ): Promise<LayoutSettings | null> {
+    const res = await this.api.layout.updateByBookId(bookId, input);
+    if (res && 'error' in res) throw new Error((res as { error: string }).error);
+    return res as LayoutSettings | null;
   }
 
   // ── DocumentSection ───────────────────────────────────────────────────────

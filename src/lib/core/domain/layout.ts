@@ -17,13 +17,8 @@ export type LayoutSettingsId = string & { readonly [LayoutSettingsIdBrand]: neve
 
 export type PageUnit = 'mm' | 'in' | 'pt' | 'px';
 
-/**
- * Modo de numeración de páginas visible al lector.
- * - none:     Sin numeración
- * - arabic:   1, 2, 3 ... (cuerpo principal)
- * - roman:    i, ii, iii ... (frontmatter)
- */
-export type NumberingStyle = 'none' | 'arabic' | 'roman';
+export type FrontmatterNumberingStyle = 'none' | 'roman-lower' | 'roman-upper';
+export type BodyNumberingStyle = 'arabic';
 
 // ─── Entidad LayoutSettings ───────────────────────────────────────────────────
 
@@ -51,11 +46,13 @@ export interface LayoutSettings {
   paragraphSpacing:         number;             // Espacio entre párrafos (pt)
   firstLineIndent:          number;             // Sangría de primera línea (mm)
 
-  // ── Numeración ────────────────────────────────────────────────────────────
-  pageNumberMode:           'none' | 'continuous' | 'per_section';
+  // ── Numeración editorial ─────────────────────────────────────────────────
+  showPageNumbers:          boolean;
   pageNumberStart:          number;             // Número inicial del cuerpo principal
-  frontmatterNumberingStyle: NumberingStyle;    // Estilo para páginas preliminares
-  bodyNumberingStyle:       NumberingStyle;     // Estilo para el cuerpo
+  frontmatterNumberingStyle: FrontmatterNumberingStyle;
+  bodyNumberingStyle:       BodyNumberingStyle;
+  bodyStartsAtSectionId:    string | null;
+  hideNumberOnSectionTypes: string;             // JSON: SectionType[]
 
   // ── Cabeceras y pies ─────────────────────────────────────────────────────
   showHeader:               boolean;
@@ -80,6 +77,13 @@ export type UpdateLayoutSettingsInput = Partial<Omit<LayoutSettings,
   'id' | 'bookId' | 'createdAt' | 'updatedAt'
 >>;
 
+export const DEFAULT_HIDE_PAGE_NUMBER_SECTION_TYPES = [
+  'COVER',
+  'BACK_COVER',
+  'RIGHTS',
+  'DEDICATION',
+] as const;
+
 // ─── Preset por defecto (A5) ──────────────────────────────────────────────────
 
 export const DEFAULT_LAYOUT_SETTINGS: Omit<LayoutSettings, 'id' | 'bookId' | 'createdAt' | 'updatedAt'> = {
@@ -97,11 +101,13 @@ export const DEFAULT_LAYOUT_SETTINGS: Omit<LayoutSettings, 'id' | 'bookId' | 'cr
   bodyLineHeight:           1.5,
   paragraphSpacing:         6,
   firstLineIndent:          5,
-  pageNumberMode:           'continuous',
+  showPageNumbers:          true,
   pageNumberStart:          1,
-  frontmatterNumberingStyle:'roman',
+  frontmatterNumberingStyle:'roman-lower',
   bodyNumberingStyle:       'arabic',
-  showHeader:               true,
+  bodyStartsAtSectionId:    null,
+  hideNumberOnSectionTypes: JSON.stringify(DEFAULT_HIDE_PAGE_NUMBER_SECTION_TYPES),
+  showHeader:               false,
   showFooter:               true,
   headerConfigJson:         null,
   footerConfigJson:         null,

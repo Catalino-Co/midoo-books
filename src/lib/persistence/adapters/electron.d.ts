@@ -10,6 +10,8 @@ import type {
   BookProject,
   CreateBookProjectInput,
   UpdateBookProjectInput,
+  LayoutSettings,
+  UpdateLayoutSettingsInput,
   DocumentSection,
   CreateSectionInput,
   UpdateSectionInput,
@@ -54,6 +56,14 @@ declare global {
         update(id: string, input: UpdateBookProjectInput):      Promise<BookProject | null | { error: string }>;
         delete(id: string):                                      Promise<{ deleted: boolean } | { error: string }>;
         count():                                                 Promise<{ count: number } | { error: string }>;
+      };
+
+      layout: {
+        getByBookId(bookId: string):                             Promise<LayoutSettings | { error: string }>;
+        updateByBookId(
+          bookId: string,
+          input: UpdateLayoutSettingsInput,
+        ): Promise<LayoutSettings | null | { error: string }>;
       };
 
       // ── DocumentSection CRUD ──────────────────────────────────────────────

@@ -52,12 +52,13 @@ export {
 export type {
   LayoutSettingsId,
   PageUnit,
-  NumberingStyle,
+  FrontmatterNumberingStyle,
+  BodyNumberingStyle,
   LayoutSettings,
   CreateLayoutSettingsInput,
   UpdateLayoutSettingsInput,
 } from './layout';
-export { DEFAULT_LAYOUT_SETTINGS } from './layout';
+export { DEFAULT_LAYOUT_SETTINGS, DEFAULT_HIDE_PAGE_NUMBER_SECTION_TYPES } from './layout';
 
 // ── Asset ─────────────────────────────────────────────────────────────────────
 export type {

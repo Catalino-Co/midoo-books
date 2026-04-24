@@ -18,6 +18,8 @@ import type {
   BookProject,
   CreateBookProjectInput,
   UpdateBookProjectInput,
+  LayoutSettings,
+  UpdateLayoutSettingsInput,
   DocumentSection,
   CreateSectionInput,
   UpdateSectionInput,
@@ -27,12 +29,18 @@ import type {
   Asset,
   UpdateAssetInput,
 } from '$lib/core/domain/index';
-import { asBookProjectId, DEFAULT_BOOK_STATUS, DEFAULT_LANGUAGE_CODE } from '$lib/core/domain/index';
+import {
+  asBookProjectId,
+  DEFAULT_BOOK_STATUS,
+  DEFAULT_LANGUAGE_CODE,
+  DEFAULT_LAYOUT_SETTINGS,
+} from '$lib/core/domain/index';
 import { asSectionId } from '$lib/core/domain/section';
 import { asBlockId } from '$lib/core/domain/block';
 
 const PREFIX = 'midoo:';
 const BOOKS_KEY = `${PREFIX}books`;
+const LAYOUT_KEY = `${PREFIX}layouts`;
 
 // ─── Helpers localStorage ─────────────────────────────────────────────────────
 
@@ -45,6 +53,17 @@ function readBooks(): BookProject[] {
 
 function writeBooks(books: BookProject[]): void {
   localStorage.setItem(BOOKS_KEY, JSON.stringify(books));
+}
+
+function readLayouts(): LayoutSettings[] {
+  try {
+    const raw = localStorage.getItem(LAYOUT_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function writeLayouts(layouts: LayoutSettings[]): void {
+  localStorage.setItem(LAYOUT_KEY, JSON.stringify(layouts));
 }
 
 function newId(): string {
@@ -109,6 +128,15 @@ export class WebAdapter implements IPlatformAdapter {
     };
     books.push(book);
     writeBooks(books);
+    const layouts = readLayouts();
+    layouts.push({
+      id:                    newId() as LayoutSettings['id'],
+      bookId:                book.id,
+      ...DEFAULT_LAYOUT_SETTINGS,
+      createdAt:             ts,
+      updatedAt:             ts,
+    });
+    writeLayouts(layouts);
     return Promise.resolve(book);
   }
 
@@ -142,7 +170,41 @@ export class WebAdapter implements IPlatformAdapter {
     const filtered = books.filter(b => b.id !== id);
     if (filtered.length === books.length) return Promise.resolve(false);
     writeBooks(filtered);
+    writeLayouts(readLayouts().filter(layout => layout.bookId !== id));
     return Promise.resolve(true);
+  }
+
+  getLayoutSettingsByBookId(bookId: string): Promise<LayoutSettings> {
+    const existing = readLayouts().find(layout => layout.bookId === bookId);
+    if (existing) return Promise.resolve(existing);
+    const ts = now();
+    const created: LayoutSettings = {
+      id:        newId() as LayoutSettings['id'],
+      bookId,
+      ...DEFAULT_LAYOUT_SETTINGS,
+      createdAt: ts,
+      updatedAt: ts,
+    };
+    writeLayouts([...readLayouts(), created]);
+    return Promise.resolve(created);
+  }
+
+  async updateLayoutSettingsByBookId(
+    bookId: string,
+    input: UpdateLayoutSettingsInput,
+  ): Promise<LayoutSettings | null> {
+    const layouts = readLayouts();
+    const existing = await this.getLayoutSettingsByBookId(bookId);
+    const idx = layouts.findIndex(layout => layout.bookId === bookId);
+    const updated: LayoutSettings = {
+      ...existing,
+      ...Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)),
+      updatedAt: now(),
+    };
+    if (idx === -1) layouts.push(updated);
+    else layouts[idx] = updated;
+    writeLayouts(layouts);
+    return updated;
   }
 
   // ── Secciones y bloques — stubs (TODO Fase 3: IndexedDB) ─────────────────

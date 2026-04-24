@@ -41,7 +41,8 @@ export type {
   UpdateBlockInput,
   LayoutSettingsId,
   PageUnit,
-  NumberingStyle,
+  FrontmatterNumberingStyle,
+  BodyNumberingStyle,
   LayoutSettings,
   CreateLayoutSettingsInput,
   UpdateLayoutSettingsInput,
@@ -76,4 +77,5 @@ export {
   DEFAULT_BLOCK_TYPE,
   asAssetId,
   DEFAULT_LAYOUT_SETTINGS,
+  DEFAULT_HIDE_PAGE_NUMBER_SECTION_TYPES,
 } from './domain/index';

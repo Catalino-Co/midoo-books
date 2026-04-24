@@ -11,6 +11,8 @@ import type {
   BookProject,
   CreateBookProjectInput,
   UpdateBookProjectInput,
+  LayoutSettings,
+  UpdateLayoutSettingsInput,
   DocumentSection,
   CreateSectionInput,
   UpdateSectionInput,
@@ -47,6 +49,13 @@ export interface IPlatformAdapter {
   getBookById(id: string):                                Promise<BookProject | null>;
   updateBook(id: string, input: UpdateBookProjectInput):  Promise<BookProject | null>;
   deleteBook(id: string):                                 Promise<boolean>;
+
+  // ── LayoutSettings ────────────────────────────────────────────────────────
+  getLayoutSettingsByBookId(bookId: string):              Promise<LayoutSettings>;
+  updateLayoutSettingsByBookId(
+    bookId: string,
+    input: UpdateLayoutSettingsInput,
+  ): Promise<LayoutSettings | null>;
 
   // ── DocumentSection ───────────────────────────────────────────────────────
   createSection(input: CreateSectionInput):               Promise<DocumentSection>;

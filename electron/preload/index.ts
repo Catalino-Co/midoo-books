@@ -76,4 +76,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     importPaths:   (bookId, paths)          => ipcRenderer.invoke('assets:importPaths', bookId, paths),
   },
 
+  layout: {
+    getByBookId:    (bookId)                => ipcRenderer.invoke('layout:getByBookId', bookId),
+    updateByBookId: (bookId, input)         => ipcRenderer.invoke('layout:updateByBookId', bookId, input),
+  },
+
 });

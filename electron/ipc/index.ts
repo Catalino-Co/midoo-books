@@ -22,6 +22,7 @@ import { registerDbHandlers }    from './handlers/db.handlers';
 import { registerFsHandlers }    from './handlers/fs.handlers';
 import { registerBooksHandlers } from './handlers/books.handlers';
 import { registerAssetHandlers } from './handlers/assets.handlers';
+import { registerLayoutHandlers } from './handlers/layout.handlers';
 
 export function registerAllHandlers(): void {
   registerAppHandlers();
@@ -29,6 +30,7 @@ export function registerAllHandlers(): void {
   registerFsHandlers();
   registerBooksHandlers();
   registerAssetHandlers();
+  registerLayoutHandlers();
 
   console.log('[IPC] Todos los handlers registrados.');
 }

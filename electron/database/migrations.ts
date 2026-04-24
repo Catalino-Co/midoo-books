@@ -587,6 +587,103 @@ const migrations: Migration[] = [
     },
   },
 
+  // ─── v8: Numeración editorial y header/footer básicos (PARTE 10) ─────────
+  {
+    version: 8,
+    name: 'editorial_numbering_layout_settings',
+    up(db) {
+      db.run('ALTER TABLE layout_settings RENAME TO _bkp_layout_settings_v8');
+
+      db.run(`
+        CREATE TABLE layout_settings (
+          id                          TEXT PRIMARY KEY,
+          book_id                     TEXT NOT NULL UNIQUE
+                                        REFERENCES book_projects(id) ON DELETE CASCADE,
+          page_width                  REAL NOT NULL DEFAULT 148,
+          page_height                 REAL NOT NULL DEFAULT 210,
+          page_unit                   TEXT NOT NULL DEFAULT 'mm'
+                                        CHECK(page_unit IN ('mm','in','pt','px')),
+          margin_top                  REAL NOT NULL DEFAULT 20,
+          margin_bottom               REAL NOT NULL DEFAULT 22,
+          margin_inside               REAL NOT NULL DEFAULT 22,
+          margin_outside              REAL NOT NULL DEFAULT 18,
+          facing_pages                INTEGER NOT NULL DEFAULT 1,
+          body_font_family            TEXT NOT NULL DEFAULT 'Georgia, serif',
+          heading_font_family         TEXT NOT NULL DEFAULT 'Helvetica Neue, Arial, sans-serif',
+          body_font_size              REAL NOT NULL DEFAULT 11,
+          body_line_height            REAL NOT NULL DEFAULT 1.5,
+          paragraph_spacing           REAL NOT NULL DEFAULT 6,
+          first_line_indent           REAL NOT NULL DEFAULT 5,
+          show_page_numbers           INTEGER NOT NULL DEFAULT 1,
+          page_number_start           INTEGER NOT NULL DEFAULT 1,
+          frontmatter_numbering_style TEXT NOT NULL DEFAULT 'roman-lower'
+                                        CHECK(frontmatter_numbering_style IN ('none','roman-lower','roman-upper')),
+          body_numbering_style        TEXT NOT NULL DEFAULT 'arabic'
+                                        CHECK(body_numbering_style IN ('arabic')),
+          body_starts_at_section_id   TEXT,
+          hide_number_on_section_types TEXT NOT NULL DEFAULT '["COVER","BACK_COVER","RIGHTS","DEDICATION"]',
+          show_header                 INTEGER NOT NULL DEFAULT 0,
+          show_footer                 INTEGER NOT NULL DEFAULT 1,
+          header_config_json          TEXT,
+          footer_config_json          TEXT,
+          toc_config_json             TEXT,
+          created_at                  TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at                  TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+
+      db.run(`
+        INSERT INTO layout_settings (
+          id, book_id,
+          page_width, page_height, page_unit,
+          margin_top, margin_bottom, margin_inside, margin_outside, facing_pages,
+          body_font_family, heading_font_family, body_font_size, body_line_height,
+          paragraph_spacing, first_line_indent,
+          show_page_numbers, page_number_start, frontmatter_numbering_style, body_numbering_style,
+          body_starts_at_section_id, hide_number_on_section_types,
+          show_header, show_footer, header_config_json, footer_config_json, toc_config_json,
+          created_at, updated_at
+        )
+        SELECT
+          id, book_id,
+          page_width, page_height, page_unit,
+          margin_top, margin_bottom, margin_inside, margin_outside, facing_pages,
+          body_font_family, heading_font_family, body_font_size, body_line_height,
+          paragraph_spacing, first_line_indent,
+          CASE lower(COALESCE(page_number_mode, 'continuous'))
+            WHEN 'none' THEN 0
+            ELSE 1
+          END,
+          page_number_start,
+          CASE lower(COALESCE(frontmatter_numbering_style, 'roman'))
+            WHEN 'none' THEN 'none'
+            ELSE 'roman-lower'
+          END,
+          'arabic',
+          NULL,
+          '["COVER","BACK_COVER","RIGHTS","DEDICATION"]',
+          show_header,
+          show_footer,
+          header_config_json,
+          footer_config_json,
+          toc_config_json,
+          created_at,
+          updated_at
+        FROM _bkp_layout_settings_v8
+      `);
+
+      db.run('DROP TABLE _bkp_layout_settings_v8');
+
+      db.run(`
+        INSERT OR REPLACE INTO app_settings (key, value) VALUES
+          ('appVersion',    '0.8.0'),
+          ('schemaVersion', '8')
+      `);
+
+      console.log('[DB] v8: layout_settings ampliada con numeración editorial básica.');
+    },
+  },
+
 ];
 
 /**
