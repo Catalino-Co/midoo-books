@@ -390,6 +390,14 @@
     font-size: 13px;
     font-family: inherit;
   }
+  select.input {
+    color-scheme: dark;
+    background-color: #262632;
+  }
+  select.input option {
+    background-color: #1b1b26;
+    color: #e8e8f4;
+  }
 
   .toggle-row {
     display: flex;

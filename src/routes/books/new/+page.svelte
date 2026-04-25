@@ -315,7 +315,11 @@
 
   .field-textarea { resize: vertical; min-height: 80px; }
 
-  .field-select { cursor: pointer; }
+  .field-select {
+    cursor: pointer;
+    color-scheme: dark;
+    background-color: #262632;
+  }
   .field-select option { background: #1a1a2e; color: #e8e8f4; }
 
   /* ── Acciones ─────────────────────────────────────────────────────────────── */

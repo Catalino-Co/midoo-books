@@ -36,6 +36,16 @@
   function bodyText(pl: PlacedBlock): string {
     return pl.textOverride ?? pl.block?.contentText ?? '';
   }
+
+  function isFullPageImage(page: RenderedPage, pl: PlacedBlock): boolean {
+    if (pl.block?.blockType !== 'IMAGE') return false;
+    const img = parseImageBlockContent(pl.block.contentJson);
+    return page.primarySectionType === 'COVER' || img.fillPage;
+  }
+
+  function pageUsesFullPageImage(page: RenderedPage): boolean {
+    return page.placements.some(pl => isFullPageImage(page, pl));
+  }
 </script>
 
 <div class="paged-root">
@@ -90,14 +100,15 @@
           class:page-sheet--left={activePage.side === 'left'}
           class:page-sheet--right={activePage.side === 'right'}
           class:page-sheet--blank={activePage.kind === 'editorial_blank'}
+          class:page-sheet--cover={pageUsesFullPageImage(activePage)}
         >
-          {#if activePage.editorial.headerText}
+          {#if activePage.editorial.headerText && !pageUsesFullPageImage(activePage)}
             <div class="page-header">
               <span>{activePage.editorial.headerText}</span>
             </div>
           {/if}
 
-          <header class="page-rail">
+          <header class="page-rail" class:page-rail--hidden={pageUsesFullPageImage(activePage)}>
             {#if activePage.primarySectionType}
               <span class="rail-type">{sectionTypeLabel(activePage.primarySectionType)}</span>
               {#if activePage.primarySectionTitle}
@@ -108,7 +119,7 @@
             {/if}
           </header>
 
-          <div class="page-body">
+          <div class="page-body" class:page-body--cover={pageUsesFullPageImage(activePage)}>
             {#if activePage.kind === 'editorial_blank'}
               <div class="blank-mark" aria-hidden="true"></div>
               <p class="blank-label">Página en blanco editorial</p>
@@ -163,9 +174,15 @@
                   {:else if pl.block?.blockType === 'IMAGE'}
                     {@const im = parseImageBlockContent(pl.block.contentJson)}
                     {@const u = assetUrlFor(im.assetId)}
-                    <figure class="img-render">
+                    <figure class="img-render" class:img-render--cover={isFullPageImage(activePage, pl)}>
                       {#if u}
                         <img src={u} alt={im.altText || ''} />
+                        {#if isFullPageImage(activePage, pl)}
+                          <div class="img-safe-zone" aria-hidden="true">
+                            <div class="img-safe-zone__frame"></div>
+                            <span class="img-safe-zone__label">Zona segura</span>
+                          </div>
+                        {/if}
                       {:else}
                         <div class="img-ph">Sin recurso</div>
                       {/if}
@@ -191,7 +208,7 @@
             {/if}
           </div>
 
-          <footer class="page-footer">
+          <footer class="page-footer" class:page-footer--hidden={pageUsesFullPageImage(activePage)}>
             <span class="folio">Folio físico {activePage.physicalPageNumber}</span>
             {#if activePage.editorial.footerText}
               <span class="folio-ed">{activePage.editorial.footerText}</span>
@@ -236,24 +253,28 @@
   .thumb-col {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
+    width: 92px;
     max-height: min(72vh, 560px);
     overflow-y: auto;
     flex-shrink: 0;
-    padding: 4px;
-    border-radius: 10px;
+    padding: 6px;
+    border-radius: 12px;
     background: rgba(0, 0, 0, 0.2);
   }
   .thumb {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
-    border-radius: 8px;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    min-height: 40px;
+    padding: 8px 12px;
+    border-radius: 10px;
     border: 1px solid rgba(255, 255, 255, 0.08);
     background: rgba(30, 30, 46, 0.9);
     color: rgba(255, 255, 255, 0.65);
-    font-size: 11px;
+    font-size: 12px;
     cursor: pointer;
     font-family: inherit;
     text-align: left;
@@ -271,14 +292,15 @@
     opacity: 0.85;
   }
   .thumb-side {
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 800;
     opacity: 0.45;
-    width: 14px;
+    min-width: 16px;
   }
   .thumb-num {
     font-weight: 700;
     font-variant-numeric: tabular-nums;
+    margin-left: auto;
   }
 
   .main-col {
@@ -321,8 +343,11 @@
 
   .page-sheet {
     --page-w: min(440px, 94vw);
+    --page-h: calc(var(--page-w) * 1.414);
     width: var(--page-w);
-    min-height: calc(var(--page-w) * 1.414);
+    height: var(--page-h);
+    min-height: var(--page-h);
+    max-height: var(--page-h);
     margin: 0 auto;
     background: #fafaf8;
     color: #1a1a22;
@@ -347,6 +372,9 @@
   .page-sheet--blank {
     background: linear-gradient(145deg, #f2f2f0 0%, #e8e8e4 100%);
   }
+  .page-sheet--cover {
+    overflow: hidden;
+  }
 
   .page-rail {
     padding: 10px 14px 6px;
@@ -354,6 +382,9 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+  }
+  .page-rail--hidden {
+    display: none;
   }
   .page-header {
     padding: 10px 22px 0;
@@ -387,6 +418,11 @@
     font-family: 'Georgia', 'Times New Roman', serif;
     font-size: 13px;
     line-height: 1.55;
+  }
+  .page-body--cover {
+    padding: 0;
+    display: flex;
+    flex-direction: column;
   }
 
   .blank-mark {
@@ -496,12 +532,28 @@
   .img-render {
     margin: 0.5em 0;
   }
+  .img-render--cover {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    min-height: 100%;
+    position: relative;
+  }
   .img-render img {
     display: block;
     max-width: 100%;
     max-height: 220px;
     object-fit: contain;
     margin: 0 auto;
+  }
+  .img-render--cover img {
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    object-fit: contain;
+    margin: 0;
+    background: #fafaf8;
   }
   .img-ph {
     min-height: 100px;
@@ -511,6 +563,32 @@
     background: rgba(0, 0, 0, 0.05);
     color: rgba(0, 0, 0, 0.35);
     font-size: 12px;
+  }
+  .img-safe-zone {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .img-safe-zone__frame {
+    position: absolute;
+    inset: 8%;
+    border: 1.5px dashed rgba(255, 255, 255, 0.78);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
+    border-radius: 2px;
+  }
+  .img-safe-zone__label {
+    position: absolute;
+    top: calc(8% - 10px);
+    right: 8%;
+    transform: translateY(-100%);
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.54);
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
   }
   .img-render figcaption {
     font-size: 11px;
@@ -605,6 +683,9 @@
     flex-wrap: wrap;
     font-size: 10px;
     color: rgba(0, 0, 0, 0.38);
+  }
+  .page-footer--hidden {
+    display: none;
   }
   .folio {
     font-variant-numeric: tabular-nums;

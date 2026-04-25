@@ -170,6 +170,7 @@
   let insp_bImageAssetId   = $state('');
   let insp_bImageAlt       = $state('');
   let insp_bImageCaption   = $state('');
+  let insp_bImageFillPage  = $state(false);
 
   let insp_bCoLabel          = $state('');
   let insp_bCoTitle          = $state('');
@@ -342,10 +343,12 @@
       insp_bImageAssetId = img.assetId ?? '';
       insp_bImageAlt     = img.altText;
       insp_bImageCaption = img.caption;
+      insp_bImageFillPage = img.fillPage;
     } else {
       insp_bImageAssetId = '';
       insp_bImageAlt     = '';
       insp_bImageCaption = '';
+      insp_bImageFillPage = false;
     }
     if (block.blockType === 'CHAPTER_OPENING') {
       const co = parseChapterOpeningContent(block.contentJson);
@@ -435,6 +438,7 @@
           assetId: insp_bImageAssetId.trim() !== '' ? insp_bImageAssetId.trim() : null,
           altText: insp_bImageAlt,
           caption: insp_bImageCaption,
+          fillPage: insp_bImageFillPage,
         });
       } else if (insp_bType === 'CHAPTER_OPENING') {
         contentJsonPayload = serializeChapterOpeningContent({
@@ -1589,6 +1593,21 @@
                 maxlength={2000}
                 placeholder="Pie de foto (opcional)"
               ></textarea>
+            </div>
+            <div class="insp-field insp-field--inline">
+              <label class="insp-label insp-label--inline" for="ib-img-fillpage">
+                Ocupar toda la página
+                <span class="insp-hint">
+                  Usa esta imagen como página completa en la preview paginada.
+                </span>
+              </label>
+              <input
+                id="ib-img-fillpage"
+                type="checkbox"
+                class="insp-checkbox"
+                bind:checked={insp_bImageFillPage}
+                onchange={() => { markInspectorDirty(); onInspectorBlur(); }}
+              />
             </div>
           {:else if inspSurface === 'chapter_opening'}
             <div class="insp-field">

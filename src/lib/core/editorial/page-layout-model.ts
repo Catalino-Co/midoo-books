@@ -36,6 +36,14 @@ export interface PlacedBlock {
   tocEntries?: TocEntry[];
   tocConfig?: TocConfig;
   syntheticType?: 'TOC';
+  debugMeta?: {
+    fragmented?: boolean;
+    continuedFromPreviousPage?: boolean;
+    continuesOnNextPage?: boolean;
+    fragmentLineStart?: number;
+    fragmentLineCount?: number;
+    keepWithNextApplied?: boolean;
+  };
 }
 
 export interface RenderedPage {

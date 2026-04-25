@@ -40,10 +40,6 @@
 <div class="preview-page">
   <header class="preview-head">
     <h1 class="preview-title">Vista previa paginada</h1>
-    <p class="preview-lead">
-      Maquetación v1: páginas editoriales básicas, recto/verso, saltos y blancos forzados.
-      La paginación se calcula en el motor (<code class="code">page-layout-engine</code>), no en este componente.
-    </p>
     <button type="button" class="btn-reload" onclick={() => void load()} disabled={loading}>
       {loading ? 'Actualizando…' : 'Recargar'}
     </button>
@@ -76,20 +72,6 @@
     font-size: 20px;
     font-weight: 700;
     color: rgba(255, 255, 255, 0.88);
-  }
-  .preview-lead {
-    margin: 0 0 10px;
-    font-size: 13px;
-    line-height: 1.55;
-    color: rgba(255, 255, 255, 0.45);
-    max-width: 52rem;
-  }
-  .code {
-    font-family: ui-monospace, monospace;
-    font-size: 0.92em;
-    padding: 1px 5px;
-    border-radius: 4px;
-    background: rgba(255, 255, 255, 0.08);
   }
   .btn-reload {
     font-size: 12px;

@@ -21,31 +21,83 @@ import {
 } from './toc-generation';
 import type { TocConfig, TocEntry } from './toc-model';
 
-/** Altura útil del cuerpo de página (unidades internas). */
-export const PAGE_BODY_HEIGHT_UNITS = 920;
-export const PAGE_BODY_WIDTH_UNITS  = 560;
+/**
+ * Calibrado contra la preview actual:
+ * - hoja ~440px de ancho
+ * - cuerpo útil tras márgenes/rail/footer ~396px
+ * - texto principal a 13px con line-height 1.55
+ */
+export const PAGE_BODY_HEIGHT_UNITS = 540;
+export const PAGE_BODY_WIDTH_UNITS  = 396;
 
-const GAP_AFTER_BLOCK = 12;
-const CHARS_PER_LINE  = 54;
+const GAP_AFTER_BLOCK = 10;
+const CHARS_PER_LINE  = 58;
+const PARAGRAPH_LINE_UNITS = 20;
+const QUOTE_LINE_UNITS = 20;
+const PARAGRAPH_TOP_UNITS = 16;
+const PARAGRAPH_CONTINUATION_TOP_UNITS = 8;
+const QUOTE_TOP_UNITS = 20;
+const MIN_PARAGRAPH_LINES_PER_FRAGMENT = 3;
+const HEADING_KEEP_WITH_NEXT_LINES = 3;
 const TOC_ENTRY_UNITS = 26;
 const TOC_TITLE_UNITS = 52;
 const TOC_EMPTY_UNITS = 28;
 
-function estimateLines(text: string): number {
-  const t = text.replace(/\r\n/g, '\n');
-  if (!t.trim()) return 1;
-  const parts = t.split('\n');
-  let lines = 0;
-  for (const p of parts) {
-    const chunk = p.length === 0 ? 1 : Math.ceil(p.length / CHARS_PER_LINE);
-    lines += chunk;
+function wrapTextToLines(text: string): string[] {
+  const normalized = text.replace(/\r\n/g, '\n');
+  if (!normalized.trim()) return [''];
+
+  const rawLines = normalized.split('\n');
+  const out: string[] = [];
+
+  for (const rawLine of rawLines) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+      out.push('');
+      continue;
+    }
+
+    const words = trimmed.split(/\s+/);
+    let current = '';
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (candidate.length <= CHARS_PER_LINE || current === '') {
+        current = candidate;
+      } else {
+        out.push(current);
+        current = word;
+      }
+    }
+    out.push(current);
   }
-  return Math.max(1, lines);
+
+  return out.length > 0 ? out : [''];
+}
+
+function estimateLines(text: string): number {
+  return wrapTextToLines(text).length;
+}
+
+function estimateParagraphFragmentUnits(lineCount: number, continuedFromPreviousPage: boolean): number {
+  return (continuedFromPreviousPage ? PARAGRAPH_CONTINUATION_TOP_UNITS : PARAGRAPH_TOP_UNITS)
+    + (lineCount * PARAGRAPH_LINE_UNITS);
+}
+
+function estimateQuoteFragmentUnits(lineCount: number): number {
+  return QUOTE_TOP_UNITS + (lineCount * QUOTE_LINE_UNITS);
+}
+
+function maxParagraphLinesForUnits(
+  maxUnits: number,
+  continuedFromPreviousPage: boolean,
+): number {
+  const topUnits = continuedFromPreviousPage ? PARAGRAPH_CONTINUATION_TOP_UNITS : PARAGRAPH_TOP_UNITS;
+  return Math.max(0, Math.floor((maxUnits - topUnits) / PARAGRAPH_LINE_UNITS));
 }
 
 function estimateParagraphUnits(text: string): number {
   const lines = estimateLines(text);
-  return 16 + lines * 22;
+  return estimateParagraphFragmentUnits(lines, false);
 }
 
 function estimateBlockHeight(block: DocumentBlock): number {
@@ -62,6 +114,7 @@ function estimateBlockHeight(block: DocumentBlock): number {
       return 28 + estimateLines(block.contentText) * 22;
     case 'IMAGE': {
       const img = parseImageBlockContent(block.contentJson);
+      if (img.fillPage) return Math.floor(PAGE_BODY_HEIGHT_UNITS * 0.96);
       return img.assetId ? 280 : 120;
     }
     case 'SEPARATOR':
@@ -220,24 +273,136 @@ class Paginator {
   ): void {
     this.touchPrimarySection(section);
     const p = this.pages[this.currentIdx];
+    const gapBefore = p.placements.length > 0 ? GAP_AFTER_BLOCK : 0;
     p.placements.push(placed);
-    this.bumpUsed(height + GAP_AFTER_BLOCK);
+    this.bumpUsed(gapBefore + height);
   }
 
   private splitParagraph(
     text: string,
     maxUnits: number,
-  ): { first: string; rest: string } | null {
-    const t = text.trim();
-    if (!t || maxUnits < 80) return null;
-    const target = Math.floor(t.length * Math.min(0.85, maxUnits / estimateParagraphUnits(t)));
-    let cut = Math.max(20, Math.min(target, t.length - 1));
-    const space = t.lastIndexOf(' ', cut);
-    if (space > 20) cut = space;
-    const first = t.slice(0, cut).trimEnd();
-    const rest  = t.slice(cut).trimStart();
-    if (!rest) return null;
-    return { first, rest };
+    continuedFromPreviousPage: boolean,
+  ): { first: string; rest: string; lineCount: number; startLine: number } | null {
+    const lines = wrapTextToLines(text);
+    if (lines.length <= 1) return null;
+
+    let fitLines = maxParagraphLinesForUnits(maxUnits, continuedFromPreviousPage);
+    if (fitLines <= 0) return null;
+
+    if (fitLines >= lines.length) return null;
+
+    if (fitLines < MIN_PARAGRAPH_LINES_PER_FRAGMENT) return null;
+
+    const remainingLines = lines.length - fitLines;
+    if (remainingLines > 0 && remainingLines < MIN_PARAGRAPH_LINES_PER_FRAGMENT) {
+      const deficit = MIN_PARAGRAPH_LINES_PER_FRAGMENT - remainingLines;
+      fitLines = Math.max(MIN_PARAGRAPH_LINES_PER_FRAGMENT, fitLines - deficit);
+    }
+
+    if (fitLines <= 0 || fitLines >= lines.length) return null;
+
+    return {
+      first: lines.slice(0, fitLines).join('\n'),
+      rest: lines.slice(fitLines).join('\n'),
+      lineCount: fitLines,
+      startLine: 0,
+    };
+  }
+
+  private shouldMoveHeadingWithNext(
+    block: DocumentBlock,
+    next: DocumentBlock | undefined,
+  ): boolean {
+    if ((block.blockType !== 'HEADING_1' && block.blockType !== 'HEADING_2') || !next) return false;
+    if (this.used === 0) return false;
+
+    const headingUnits = estimateBlockHeight(block);
+    const nextUnits = next.blockType === 'PARAGRAPH'
+      ? estimateParagraphFragmentUnits(HEADING_KEEP_WITH_NEXT_LINES, false)
+      : Math.min(estimateBlockHeight(next), 180);
+
+    return headingUnits + GAP_AFTER_BLOCK + nextUnits > this.remaining();
+  }
+
+  private placeParagraphFlow(
+    block: DocumentBlock,
+    section: DocumentSection,
+  ): void {
+    const totalUnits = estimateParagraphUnits(block.contentText);
+    const shouldKeepWhole = block.keepTogether && totalUnits <= PAGE_BODY_HEIGHT_UNITS;
+
+    if (shouldKeepWhole && totalUnits > this.remaining() && this.used > 0) {
+      this.startNewContentPage('keepTogether en párrafo');
+    }
+
+    if (shouldKeepWhole || totalUnits <= this.remaining()) {
+      this.placePlacement(section, {
+        block,
+        estimatedUnits: totalUnits,
+        debugMeta: { fragmented: false },
+      }, totalUnits);
+      if (block.pageBreakAfter) this.forceNext = true;
+      return;
+    }
+
+    let remainingText = block.contentText;
+    let lineOffset = 0;
+    let continued = false;
+
+    while (remainingText.trim().length > 0) {
+      if (this.remaining() < estimateParagraphFragmentUnits(MIN_PARAGRAPH_LINES_PER_FRAGMENT, continued)) {
+        if (this.used > 0) {
+          this.startNewContentPage('Continuación de párrafo');
+          continued = true;
+          continue;
+        }
+      }
+
+      const split = this.splitParagraph(remainingText, this.remaining(), continued);
+      if (!split) {
+        const lines = wrapTextToLines(remainingText);
+        const h = estimateParagraphFragmentUnits(lines.length, continued);
+        if (h > this.remaining() && this.used > 0) {
+          this.startNewContentPage('Continuación de párrafo');
+          continued = true;
+          continue;
+        }
+        this.placePlacement(section, {
+          block,
+          textOverride: remainingText,
+          estimatedUnits: h,
+          debugMeta: {
+            fragmented: continued || lineOffset > 0,
+            continuedFromPreviousPage: continued || lineOffset > 0,
+            continuesOnNextPage: false,
+            fragmentLineStart: lineOffset,
+            fragmentLineCount: lines.length,
+          },
+        }, h);
+        break;
+      }
+
+      const h = estimateParagraphFragmentUnits(split.lineCount, continued);
+      this.placePlacement(section, {
+        block,
+        textOverride: split.first,
+        estimatedUnits: h,
+        debugMeta: {
+          fragmented: true,
+          continuedFromPreviousPage: continued || lineOffset > 0,
+          continuesOnNextPage: true,
+          fragmentLineStart: lineOffset,
+          fragmentLineCount: split.lineCount,
+        },
+      }, h);
+
+      remainingText = split.rest;
+      lineOffset += split.lineCount;
+      this.startNewContentPage('Continuación de párrafo fragmentado');
+      continued = true;
+    }
+
+    if (block.pageBreakAfter) this.forceNext = true;
   }
 
   placeToc(
@@ -312,6 +477,10 @@ class Paginator {
       this.startNewContentPage('pageBreakBefore en bloque');
     }
 
+    if (this.shouldMoveHeadingWithNext(block, next)) {
+      this.startNewContentPage('Heading keep-with-next');
+    }
+
     if (block.blockType === 'PAGE_BREAK') {
       if (this.used > 0) this.startNewContentPage('PAGE_BREAK');
       else this.pages[this.currentIdx].debugNotes.push('PAGE_BREAK en cabecera de página');
@@ -331,42 +500,32 @@ class Paginator {
       return;
     }
 
+    if (block.blockType === 'IMAGE') {
+      const img = parseImageBlockContent(block.contentJson);
+      if (img.fillPage) {
+        if (this.used > 0) this.startNewContentPage('IMAGE a página completa');
+        const h = Math.min(PAGE_BODY_HEIGHT_UNITS, estimateBlockHeight(block));
+        this.placePlacement(section, {
+          block,
+          estimatedUnits: h,
+          fullPageComposition: true,
+        }, h);
+        this.startNewContentPage('Tras IMAGE a página completa');
+        return;
+      }
+    }
+
+    if (block.blockType === 'PARAGRAPH') {
+      this.placeParagraphFlow(block, section);
+      return;
+    }
+
     let h = estimateBlockHeight(block);
 
     if (block.keepTogether && next) {
       const combined = h + GAP_AFTER_BLOCK + estimateBlockHeight(next);
       if (combined > this.remaining()) {
         this.startNewContentPage('keepTogether con el bloque siguiente');
-      }
-    }
-
-    if (
-      block.blockType === 'PARAGRAPH'
-      && !block.keepTogether
-      && h > this.remaining()
-      && h <= PAGE_BODY_HEIGHT_UNITS * 0.92
-      && this.remaining() > 60
-    ) {
-      const split = this.splitParagraph(block.contentText, this.remaining());
-      if (split) {
-        const h1 = estimateParagraphUnits(split.first);
-        if (h1 <= this.remaining()) {
-          this.placePlacement(section, {
-            block,
-            textOverride: split.first,
-            estimatedUnits: h1,
-          }, h1);
-          // Continuar resto en página siguiente como colocación virtual encadenada:
-          const h2 = estimateParagraphUnits(split.rest);
-          this.startNewContentPage('Continuación de párrafo fragmentado');
-          this.placePlacement(section, {
-            block,
-            textOverride: split.rest,
-            estimatedUnits: h2,
-          }, h2);
-          if (block.pageBreakAfter) this.forceNext = true;
-          return;
-        }
       }
     }
 
@@ -379,7 +538,16 @@ class Paginator {
       h = estimateBlockHeight(block);
     }
 
-    const placed: PlacedBlock = { block, estimatedUnits: h };
+    const placed: PlacedBlock = {
+      block,
+      estimatedUnits: h,
+      debugMeta: {
+        fragmented: false,
+        keepWithNextApplied: block.blockType === 'HEADING_1' || block.blockType === 'HEADING_2'
+          ? this.pages[this.currentIdx].debugNotes.includes('Heading keep-with-next')
+          : false,
+      },
+    };
     this.placePlacement(section, placed, h);
 
     if (block.pageBreakAfter) {
