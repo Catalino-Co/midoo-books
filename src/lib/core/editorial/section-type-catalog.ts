@@ -7,12 +7,37 @@
  * La lista de tipos canónicos viene del dominio (`SectionType`).
  */
 
-import type { SectionType } from '$lib/core/domain/section';
+import type { DocumentSection, SectionType } from '$lib/core/domain/section';
 
 /** Defaults editoriales aplicados al crear una sección si no se indican explícitos. */
 export interface SectionCreationDefaults {
   includeInToc:     boolean;
   startOnRightPage: boolean;
+}
+
+export type SectionDefaultTextAlign = 'left' | 'center' | 'justify';
+export type SectionDefaultOpeningBehavior = 'none' | 'chapter-opening' | 'standalone';
+
+export interface SectionEditorialPreset extends SectionCreationDefaults {
+  showPageNumber: boolean;
+  allowHeader: boolean;
+  allowFooter: boolean;
+  defaultTextAlign: SectionDefaultTextAlign;
+  defaultOpeningBehavior: SectionDefaultOpeningBehavior;
+  isStandalonePage: boolean;
+}
+
+export interface SectionEditorialRules extends SectionEditorialPreset {
+  sectionType: SectionType;
+}
+
+export interface SectionSettingsOverrides {
+  showPageNumber?: boolean;
+  allowHeader?: boolean;
+  allowFooter?: boolean;
+  defaultTextAlign?: SectionDefaultTextAlign;
+  defaultOpeningBehavior?: SectionDefaultOpeningBehavior;
+  isStandalonePage?: boolean;
 }
 
 /**
@@ -64,26 +89,188 @@ export const SECTION_TYPE_CATALOG: SectionTypeMeta[] = [
   { type: 'SPECIAL',           label: 'Sección especial',            badge: 'Especial',      group: 'special'     },
 ];
 
-/** Defaults por tipo (PARTE 4.5 — reglas iniciales, editables luego por el usuario). */
-const DEFAULTS: Record<SectionType, SectionCreationDefaults> = {
-  COVER:            { includeInToc: false, startOnRightPage: true  },
-  BACK_COVER:       { includeInToc: false, startOnRightPage: false },
-  BLANK:            { includeInToc: false, startOnRightPage: false },
-  TITLE_PAGE:       { includeInToc: false, startOnRightPage: true  },
-  CREDITS:          { includeInToc: false, startOnRightPage: false },
-  RIGHTS:           { includeInToc: false, startOnRightPage: false },
-  DEDICATION:       { includeInToc: false, startOnRightPage: false },
-  TOC:              { includeInToc: false, startOnRightPage: true  },
-  PREFACE:          { includeInToc: true,  startOnRightPage: true  },
-  PROLOGUE:         { includeInToc: true,  startOnRightPage: true  },
-  CHAPTER:          { includeInToc: true,  startOnRightPage: true  },
-  EPILOGUE:         { includeInToc: true,  startOnRightPage: true  },
-  APPENDIX:         { includeInToc: true,  startOnRightPage: true  },
-  AUTHOR_NOTE:      { includeInToc: true,  startOnRightPage: false },
-  BIBLIOGRAPHY:     { includeInToc: true,  startOnRightPage: true  },
-  INDEX_ANALYTICAL: { includeInToc: true,  startOnRightPage: true  },
-  COLOPHON:         { includeInToc: false, startOnRightPage: false },
-  SPECIAL:          { includeInToc: false, startOnRightPage: false },
+/** Presets editoriales por tipo: base centralizada y extensible. */
+const PRESETS: Record<SectionType, SectionEditorialPreset> = {
+  COVER: {
+    includeInToc: false,
+    startOnRightPage: true,
+    showPageNumber: false,
+    allowHeader: false,
+    allowFooter: false,
+    defaultTextAlign: 'center',
+    defaultOpeningBehavior: 'standalone',
+    isStandalonePage: true,
+  },
+  BACK_COVER: {
+    includeInToc: false,
+    startOnRightPage: false,
+    showPageNumber: false,
+    allowHeader: false,
+    allowFooter: false,
+    defaultTextAlign: 'center',
+    defaultOpeningBehavior: 'standalone',
+    isStandalonePage: true,
+  },
+  BLANK: {
+    includeInToc: false,
+    startOnRightPage: false,
+    showPageNumber: false,
+    allowHeader: false,
+    allowFooter: false,
+    defaultTextAlign: 'center',
+    defaultOpeningBehavior: 'standalone',
+    isStandalonePage: true,
+  },
+  TITLE_PAGE: {
+    includeInToc: false,
+    startOnRightPage: true,
+    showPageNumber: false,
+    allowHeader: false,
+    allowFooter: false,
+    defaultTextAlign: 'center',
+    defaultOpeningBehavior: 'standalone',
+    isStandalonePage: true,
+  },
+  CREDITS: {
+    includeInToc: false,
+    startOnRightPage: false,
+    showPageNumber: false,
+    allowHeader: false,
+    allowFooter: false,
+    defaultTextAlign: 'left',
+    defaultOpeningBehavior: 'standalone',
+    isStandalonePage: true,
+  },
+  RIGHTS: {
+    includeInToc: false,
+    startOnRightPage: false,
+    showPageNumber: false,
+    allowHeader: false,
+    allowFooter: false,
+    defaultTextAlign: 'left',
+    defaultOpeningBehavior: 'standalone',
+    isStandalonePage: true,
+  },
+  DEDICATION: {
+    includeInToc: false,
+    startOnRightPage: false,
+    showPageNumber: false,
+    allowHeader: false,
+    allowFooter: false,
+    defaultTextAlign: 'center',
+    defaultOpeningBehavior: 'standalone',
+    isStandalonePage: true,
+  },
+  TOC: {
+    includeInToc: false,
+    startOnRightPage: true,
+    showPageNumber: true,
+    allowHeader: false,
+    allowFooter: true,
+    defaultTextAlign: 'left',
+    defaultOpeningBehavior: 'none',
+    isStandalonePage: false,
+  },
+  PREFACE: {
+    includeInToc: true,
+    startOnRightPage: true,
+    showPageNumber: true,
+    allowHeader: true,
+    allowFooter: true,
+    defaultTextAlign: 'left',
+    defaultOpeningBehavior: 'none',
+    isStandalonePage: false,
+  },
+  PROLOGUE: {
+    includeInToc: true,
+    startOnRightPage: true,
+    showPageNumber: true,
+    allowHeader: true,
+    allowFooter: true,
+    defaultTextAlign: 'left',
+    defaultOpeningBehavior: 'none',
+    isStandalonePage: false,
+  },
+  CHAPTER: {
+    includeInToc: true,
+    startOnRightPage: true,
+    showPageNumber: true,
+    allowHeader: true,
+    allowFooter: true,
+    defaultTextAlign: 'justify',
+    defaultOpeningBehavior: 'chapter-opening',
+    isStandalonePage: false,
+  },
+  EPILOGUE: {
+    includeInToc: true,
+    startOnRightPage: true,
+    showPageNumber: true,
+    allowHeader: true,
+    allowFooter: true,
+    defaultTextAlign: 'left',
+    defaultOpeningBehavior: 'none',
+    isStandalonePage: false,
+  },
+  APPENDIX: {
+    includeInToc: true,
+    startOnRightPage: true,
+    showPageNumber: true,
+    allowHeader: true,
+    allowFooter: true,
+    defaultTextAlign: 'left',
+    defaultOpeningBehavior: 'none',
+    isStandalonePage: false,
+  },
+  AUTHOR_NOTE: {
+    includeInToc: true,
+    startOnRightPage: false,
+    showPageNumber: true,
+    allowHeader: true,
+    allowFooter: true,
+    defaultTextAlign: 'left',
+    defaultOpeningBehavior: 'none',
+    isStandalonePage: false,
+  },
+  BIBLIOGRAPHY: {
+    includeInToc: true,
+    startOnRightPage: true,
+    showPageNumber: true,
+    allowHeader: true,
+    allowFooter: true,
+    defaultTextAlign: 'left',
+    defaultOpeningBehavior: 'none',
+    isStandalonePage: false,
+  },
+  INDEX_ANALYTICAL: {
+    includeInToc: true,
+    startOnRightPage: true,
+    showPageNumber: true,
+    allowHeader: true,
+    allowFooter: true,
+    defaultTextAlign: 'left',
+    defaultOpeningBehavior: 'none',
+    isStandalonePage: false,
+  },
+  COLOPHON: {
+    includeInToc: false,
+    startOnRightPage: false,
+    showPageNumber: false,
+    allowHeader: false,
+    allowFooter: false,
+    defaultTextAlign: 'left',
+    defaultOpeningBehavior: 'standalone',
+    isStandalonePage: true,
+  },
+  SPECIAL: {
+    includeInToc: false,
+    startOnRightPage: false,
+    showPageNumber: true,
+    allowHeader: true,
+    allowFooter: true,
+    defaultTextAlign: 'left',
+    defaultOpeningBehavior: 'none',
+    isStandalonePage: false,
+  },
 };
 
 const _catalogByType = new Map<SectionType, SectionTypeMeta>(
@@ -91,8 +278,82 @@ const _catalogByType = new Map<SectionType, SectionTypeMeta>(
 );
 
 export function getSectionCreationDefaults(type: SectionType): SectionCreationDefaults {
-  const d = DEFAULTS[type] ?? DEFAULTS.CHAPTER;
-  return { ...d };
+  const d = PRESETS[type] ?? PRESETS.CHAPTER;
+  return {
+    includeInToc: d.includeInToc,
+    startOnRightPage: d.startOnRightPage,
+  };
+}
+
+export function getSectionEditorialPreset(type: SectionType): SectionEditorialPreset {
+  const preset = PRESETS[type] ?? PRESETS.CHAPTER;
+  return { ...preset };
+}
+
+export function parseSectionSettingsOverrides(rawJson: string | null | undefined): SectionSettingsOverrides {
+  if (!rawJson) return {};
+  try {
+    const parsed = JSON.parse(rawJson) as SectionSettingsOverrides;
+    return {
+      showPageNumber: typeof parsed.showPageNumber === 'boolean' ? parsed.showPageNumber : undefined,
+      allowHeader: typeof parsed.allowHeader === 'boolean' ? parsed.allowHeader : undefined,
+      allowFooter: typeof parsed.allowFooter === 'boolean' ? parsed.allowFooter : undefined,
+      defaultTextAlign: parsed.defaultTextAlign === 'left' || parsed.defaultTextAlign === 'center' || parsed.defaultTextAlign === 'justify'
+        ? parsed.defaultTextAlign
+        : undefined,
+      defaultOpeningBehavior: parsed.defaultOpeningBehavior === 'none'
+        || parsed.defaultOpeningBehavior === 'chapter-opening'
+        || parsed.defaultOpeningBehavior === 'standalone'
+        ? parsed.defaultOpeningBehavior
+        : undefined,
+      isStandalonePage: typeof parsed.isStandalonePage === 'boolean' ? parsed.isStandalonePage : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+export function resolveSectionEditorialRules(section: Pick<DocumentSection, 'sectionType' | 'includeInToc' | 'startOnRightPage' | 'settingsJson'>): SectionEditorialRules {
+  const preset = getSectionEditorialPreset(section.sectionType);
+  const overrides = parseSectionSettingsOverrides(section.settingsJson);
+  return {
+    sectionType: section.sectionType,
+    includeInToc: section.includeInToc,
+    startOnRightPage: section.startOnRightPage,
+    showPageNumber: overrides.showPageNumber ?? preset.showPageNumber,
+    allowHeader: overrides.allowHeader ?? preset.allowHeader,
+    allowFooter: overrides.allowFooter ?? preset.allowFooter,
+    defaultTextAlign: overrides.defaultTextAlign ?? preset.defaultTextAlign,
+    defaultOpeningBehavior: overrides.defaultOpeningBehavior ?? preset.defaultOpeningBehavior,
+    isStandalonePage: overrides.isStandalonePage ?? preset.isStandalonePage,
+  };
+}
+
+export function sectionPropertyIsOverridden(
+  section: Pick<DocumentSection, 'sectionType' | 'includeInToc' | 'startOnRightPage' | 'settingsJson'>,
+  property: keyof SectionEditorialPreset,
+): boolean {
+  const preset = getSectionEditorialPreset(section.sectionType);
+  const overrides = parseSectionSettingsOverrides(section.settingsJson);
+  if (property === 'includeInToc') return section.includeInToc !== preset.includeInToc;
+  if (property === 'startOnRightPage') return section.startOnRightPage !== preset.startOnRightPage;
+  return overrides[property] !== undefined && overrides[property] !== preset[property];
+}
+
+export function sectionOpeningBehaviorLabel(behavior: SectionDefaultOpeningBehavior): string {
+  switch (behavior) {
+    case 'chapter-opening': return 'Apertura de capítulo';
+    case 'standalone': return 'Página independiente';
+    default: return 'Flujo normal';
+  }
+}
+
+export function sectionDefaultTextAlignLabel(textAlign: SectionDefaultTextAlign): string {
+  switch (textAlign) {
+    case 'center': return 'Centrado';
+    case 'justify': return 'Justificado';
+    default: return 'Izquierda';
+  }
 }
 
 export function sectionTypeLabel(type: SectionType): string {

@@ -1,6 +1,7 @@
 import type { LayoutSettings } from '$lib/core/domain/layout';
 import type { SectionType, DocumentSection } from '$lib/core/domain/section';
 import type { RenderedPage } from './page-layout-model';
+import { resolveSectionEditorialRules } from './section-type-catalog';
 
 export type EditorialNumberingScope = 'frontmatter' | 'body' | null;
 
@@ -97,6 +98,7 @@ function pageCountsTowardNumbering(page: RenderedPage): boolean {
 
 function shouldShowPageNumber(
   page: RenderedPage,
+  section: DocumentSection | undefined,
   hiddenSectionTypes: Set<string>,
   settings: LayoutSettings,
   editorialLabel: string | null,
@@ -105,11 +107,14 @@ function shouldShowPageNumber(
   if (page.kind === 'editorial_blank') return false;
   if (!page.primarySectionType) return false;
   if (NEVER_NUMBERED_SECTION_TYPES.has(page.primarySectionType)) return false;
+  if (section && !resolveSectionEditorialRules(section).showPageNumber) return false;
+  if (section && !resolveSectionEditorialRules(section).allowFooter) return false;
   return !hiddenSectionTypes.has(page.primarySectionType);
 }
 
 function resolveHeaderText(
   page: RenderedPage,
+  section: DocumentSection | undefined,
   bookTitle: string,
   settings: LayoutSettings,
 ): string | null {
@@ -117,6 +122,7 @@ function resolveHeaderText(
   if (!page.primarySectionType || NEVER_NUMBERED_SECTION_TYPES.has(page.primarySectionType)) {
     return null;
   }
+  if (section && !resolveSectionEditorialRules(section).allowHeader) return null;
   return page.primarySectionTitle?.trim() || bookTitle.trim() || null;
 }
 
@@ -129,12 +135,14 @@ export function buildEditorialFrames(params: {
   const { pages, sections, bookTitle, settings } = params;
   const bodyStartSectionId = resolveBodyStartSectionId(sections, settings);
   const hiddenSectionTypes = parseHiddenSectionTypes(settings);
+  const sectionsById = new Map<string, DocumentSection>(sections.map(section => [section.id, section]));
 
   let bodyStarted = false;
   let frontmatterOrdinal = 0;
   let bodyOrdinal = Math.max(1, settings.pageNumberStart);
 
   return pages.map(page => {
+    const section = page.primarySectionId ? sectionsById.get(page.primarySectionId) : undefined;
     if (!bodyStarted && bodyStartSectionId && page.primarySectionId === bodyStartSectionId) {
       bodyStarted = true;
     }
@@ -157,8 +165,8 @@ export function buildEditorialFrames(params: {
       ? formatEditorialNumber(numberingScope, editorialOrdinal, settings)
       : null;
 
-    const showPageNumber = shouldShowPageNumber(page, hiddenSectionTypes, settings, editorialLabel);
-    const headerText = resolveHeaderText(page, bookTitle, settings);
+    const showPageNumber = shouldShowPageNumber(page, section, hiddenSectionTypes, settings, editorialLabel);
+    const headerText = resolveHeaderText(page, section, bookTitle, settings);
     const footerText = showPageNumber ? editorialLabel : null;
 
     return {

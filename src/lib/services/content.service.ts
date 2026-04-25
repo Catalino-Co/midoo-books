@@ -25,11 +25,20 @@ export {
   SECTION_TYPES_BY_GROUP,
   ALL_SECTION_TYPES,
   getSectionCreationDefaults,
+  getSectionEditorialPreset,
+  resolveSectionEditorialRules,
+  sectionPropertyIsOverridden,
   sectionTypeLabel,
   sectionTypeBadge,
+  sectionOpeningBehaviorLabel,
+  sectionDefaultTextAlignLabel,
   type SectionTypeMeta,
   type SectionTypeGroup,
   type SectionCreationDefaults,
+  type SectionEditorialPreset,
+  type SectionEditorialRules,
+  type SectionDefaultOpeningBehavior,
+  type SectionDefaultTextAlign,
 } from '$lib/core/editorial/section-type-catalog';
 
 import { getSectionCreationDefaults, sectionTypeLabel } from '$lib/core/editorial/section-type-catalog';

@@ -18,6 +18,11 @@
     createBlockInSection,
     sectionTypeLabel,
     getSectionCreationDefaults,
+    getSectionEditorialPreset,
+    resolveSectionEditorialRules,
+    sectionPropertyIsOverridden,
+    sectionOpeningBehaviorLabel,
+    sectionDefaultTextAlignLabel,
     blockTypeLabel,   blockTypeIcon,    ALL_BLOCK_TYPES,
     blockEditorSurface,
     blockShowsIncludeInToc,
@@ -137,6 +142,7 @@
   let selectedBlock = $derived(
     blocks.find(b => b.id === selectedBlockId) ?? null
   );
+  let selectedSectionRules = $derived(selectedSection ? resolveSectionEditorialRules(selectedSection) : null);
 
   // Inspector: ¿qué mostrar?
   let inspectorMode = $derived<'section' | 'block' | 'none'>(
@@ -386,6 +392,19 @@
     const d              = getSectionCreationDefaults(t);
     newSectionIncludeToc = d.includeInToc;
     newSectionStartRight = d.startOnRightPage;
+  }
+
+  function onInspectorSectionTypeChange(nextType: SectionType) {
+    const previousPreset = getSectionEditorialPreset(insp_sType);
+    const nextPreset = getSectionEditorialPreset(nextType);
+    const keepExistingTocOverride = insp_sIncludeToc !== previousPreset.includeInToc;
+    const keepExistingRightOverride = insp_sStartRight !== previousPreset.startOnRightPage;
+
+    insp_sType = nextType;
+    if (!keepExistingTocOverride) insp_sIncludeToc = nextPreset.includeInToc;
+    if (!keepExistingRightOverride) insp_sStartRight = nextPreset.startOnRightPage;
+    markInspectorDirty();
+    void onInspectorBlur();
   }
 
   function markInspectorDirty() {
@@ -791,6 +810,11 @@
             disabled={savingNewSection}
             onchange={onNewSectionTypeChange}
           />
+          {@const newSectionPreset = getSectionEditorialPreset(newSectionType)}
+          <p class="modal-hint modal-hint--insert">
+            Preset: TOC {newSectionPreset.includeInToc ? 'sí' : 'no'} · recto {newSectionPreset.startOnRightPage ? 'sí' : 'no'} ·
+            folio {newSectionPreset.showPageNumber ? 'visible' : 'oculto'} · {sectionOpeningBehaviorLabel(newSectionPreset.defaultOpeningBehavior)}
+          </p>
         </div>
         <div class="form-field form-field--row">
           <label class="form-label form-label--checkbox" for="ns-toc">
@@ -1391,8 +1415,42 @@
             <label class="insp-label" for="is-type">Tipo de sección</label>
             <SectionTypeSelect
               value={insp_sType}
-              onchange={(t) => { insp_sType = t; markInspectorDirty(); onInspectorBlur(); }}
+              onchange={onInspectorSectionTypeChange}
             />
+          </div>
+
+          {@const currentPreset = getSectionEditorialPreset(insp_sType)}
+          <div class="insp-preset-card">
+            <div class="insp-preset-title">Preset editorial del tipo</div>
+            <div class="insp-preset-grid">
+              <span class="insp-preset-chip" class:insp-preset-chip--override={selectedSection ? sectionPropertyIsOverridden(selectedSection, 'includeInToc') : false}>
+                TOC: {currentPreset.includeInToc ? 'sí' : 'no'}
+              </span>
+              <span class="insp-preset-chip" class:insp-preset-chip--override={selectedSection ? sectionPropertyIsOverridden(selectedSection, 'startOnRightPage') : false}>
+                Recto: {currentPreset.startOnRightPage ? 'sí' : 'no'}
+              </span>
+              <span class="insp-preset-chip">
+                Folio: {currentPreset.showPageNumber ? 'visible' : 'oculto'}
+              </span>
+              <span class="insp-preset-chip">
+                Cabecera: {currentPreset.allowHeader ? 'permitida' : 'oculta'}
+              </span>
+              <span class="insp-preset-chip">
+                Pie: {currentPreset.allowFooter ? 'permitido' : 'oculto'}
+              </span>
+              <span class="insp-preset-chip">
+                Apertura: {sectionOpeningBehaviorLabel(currentPreset.defaultOpeningBehavior)}
+              </span>
+              <span class="insp-preset-chip">
+                Alineación: {sectionDefaultTextAlignLabel(currentPreset.defaultTextAlign)}
+              </span>
+              <span class="insp-preset-chip">
+                Página propia: {currentPreset.isStandalonePage ? 'sí' : 'no'}
+              </span>
+            </div>
+            <p class="insp-preset-note">
+              El tipo propone estos defaults al crear la sección. `Incluir en índice` e `Iniciar en página derecha` se pueden sobrescribir manualmente.
+            </p>
           </div>
 
           <div class="insp-divider"></div>
@@ -1426,6 +1484,11 @@
             <span class="insp-meta-row"><span class="insp-meta-key">ID</span><span class="insp-meta-val">{selectedSection.id.slice(0, 12)}…</span></span>
             <span class="insp-meta-row"><span class="insp-meta-key">Bloques</span><span class="insp-meta-val">{blocks.length}</span></span>
             <span class="insp-meta-row"><span class="insp-meta-key">Posición</span><span class="insp-meta-val">#{selectedSection.orderIndex + 1}</span></span>
+            {#if selectedSectionRules}
+              <span class="insp-meta-row"><span class="insp-meta-key">Folio efectivo</span><span class="insp-meta-val">{selectedSectionRules.showPageNumber ? 'Permitido' : 'Oculto'}</span></span>
+              <span class="insp-meta-row"><span class="insp-meta-key">Cabecera efectiva</span><span class="insp-meta-val">{selectedSectionRules.allowHeader ? 'Permitida' : 'Oculta'}</span></span>
+              <span class="insp-meta-row"><span class="insp-meta-key">Pie efectivo</span><span class="insp-meta-val">{selectedSectionRules.allowFooter ? 'Permitido' : 'Oculto'}</span></span>
+            {/if}
           </div>
 
         </div>
@@ -2931,6 +2994,55 @@
   .insp-divider {
     height: 1px;
     background: rgba(255,255,255,0.05);
+  }
+
+  .insp-preset-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .insp-preset-title {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.38);
+  }
+
+  .insp-preset-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .insp-preset-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 8px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.62);
+    font-size: 10px;
+    line-height: 1;
+  }
+
+  .insp-preset-chip--override {
+    border-color: rgba(122,184,232,0.35);
+    color: #a7d5f7;
+    background: rgba(122,184,232,0.08);
+  }
+
+  .insp-preset-note {
+    margin: 0;
+    font-size: 10px;
+    line-height: 1.45;
+    color: rgba(255,255,255,0.3);
   }
 
   .insp-section-label {
