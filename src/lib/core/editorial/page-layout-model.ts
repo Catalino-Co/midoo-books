@@ -9,6 +9,7 @@ import type { SectionType, DocumentSection } from '$lib/core/domain/section';
 import type { DocumentBlock } from '$lib/core/domain/block';
 import type { LayoutSettings } from '$lib/core/domain/layout';
 import type { PageEditorialFrame } from './editorial-page-numbering';
+import type { TocConfig, TocEntry } from './toc-model';
 
 export type PageSpreadSide = 'left' | 'right';
 
@@ -25,13 +26,16 @@ export function pageSpreadSide(physicalIndex: number): PageSpreadSide {
 
 export interface PlacedBlock {
   /** Bloque original (no mutar al serializar). */
-  block: DocumentBlock;
+  block: DocumentBlock | null;
   /** Texto mostrado si se fragmentó un párrafo/cita en varias colocaciones. */
   textOverride?: string | null;
   /** Altura estimada consumida en unidades internas del motor v1. */
   estimatedUnits: number;
   /** Composición que debe ocupar el cuerpo completo de la página (apertura de capítulo). */
   fullPageComposition?: boolean;
+  tocEntries?: TocEntry[];
+  tocConfig?: TocConfig;
+  syntheticType?: 'TOC';
 }
 
 export interface RenderedPage {
@@ -71,6 +75,7 @@ export interface BookLayoutSnapshot {
 export interface PaginatedBookResult {
   bookId: string;
   pages: RenderedPage[];
+  tocEntries: TocEntry[];
   /** Unidades de altura del cuerpo útil (constante del motor v1). */
   pageBodyHeightUnits: number;
   /** Ancho lógico (constante v1). */

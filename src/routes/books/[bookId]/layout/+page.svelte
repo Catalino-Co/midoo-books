@@ -8,6 +8,8 @@
     FRONTMATTER_NUMBERING_STYLE_OPTIONS,
     frontmatterNumberingStyleLabel,
     parseHiddenPageNumberSectionTypes,
+    parseLayoutTocConfig,
+    serializeLayoutTocConfig,
   } from '$lib/services/layout.service';
   import type { DocumentSection, SectionType, FrontmatterNumberingStyle } from '$lib/core/domain/index';
   import { DEFAULT_HIDE_PAGE_NUMBER_SECTION_TYPES } from '$lib/core/domain/index';
@@ -28,6 +30,9 @@
   let showFooter = $state(true);
   let showHeader = $state(false);
   let hiddenTypes = $state<SectionType[]>([...DEFAULT_HIDE_PAGE_NUMBER_SECTION_TYPES]);
+  let tocShowTitle = $state(true);
+  let tocTitleText = $state('Índice');
+  let tocShowDotLeaders = $state(true);
 
   const hideTypeOptions: SectionType[] = ['COVER', 'BACK_COVER', 'RIGHTS', 'DEDICATION', 'TOC'];
 
@@ -51,6 +56,10 @@
       showFooter = layout.showFooter;
       showHeader = layout.showHeader;
       hiddenTypes = parseHiddenPageNumberSectionTypes(layout.hideNumberOnSectionTypes) as SectionType[];
+      const tocConfig = parseLayoutTocConfig(layout.tocConfigJson);
+      tocShowTitle = tocConfig.showTitle;
+      tocTitleText = tocConfig.titleText;
+      tocShowDotLeaders = tocConfig.showDotLeaders;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -78,6 +87,11 @@
         hideNumberOnSectionTypes: JSON.stringify(hiddenTypes),
         showFooter,
         showHeader,
+        tocConfigJson: serializeLayoutTocConfig({
+          showTitle: tocShowTitle,
+          titleText: tocTitleText.trim() || 'Índice',
+          showDotLeaders: tocShowDotLeaders,
+        }),
       });
       saveOk = true;
       setTimeout(() => {
@@ -179,6 +193,37 @@
             <small>Versión básica: título de sección o del libro.</small>
           </span>
           <input type="checkbox" bind:checked={showHeader} />
+        </label>
+      </section>
+
+      <section class="panel">
+        <h2 class="panel-title">Índice automático</h2>
+
+        <label class="toggle-row">
+          <span>
+            <strong>Mostrar título del índice</strong>
+            <small>Se usa cuando una sección `TOC` o un marcador `[[TOC]]` renderizan el índice.</small>
+          </span>
+          <input type="checkbox" bind:checked={tocShowTitle} />
+        </label>
+
+        <div class="field">
+          <label for="toc-title">Título visible</label>
+          <input
+            id="toc-title"
+            class="input"
+            type="text"
+            maxlength="80"
+            bind:value={tocTitleText}
+          />
+        </div>
+
+        <label class="toggle-row">
+          <span>
+            <strong>Mostrar puntos guía</strong>
+            <small>Render ligero en preview entre el título y el número de página.</small>
+          </span>
+          <input type="checkbox" bind:checked={tocShowDotLeaders} />
         </label>
       </section>
 

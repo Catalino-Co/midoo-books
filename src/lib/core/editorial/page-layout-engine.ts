@@ -14,6 +14,12 @@ import { parseImageBlockContent } from './image-block-content';
 import type { BookLayoutSnapshot, PaginatedBookResult, PlacedBlock, RenderedPage } from './page-layout-model';
 import { pageSpreadSide } from './page-layout-model';
 import { buildEditorialFrames } from './editorial-page-numbering';
+import {
+  blockContainsTocMarker,
+  buildTocEntries,
+  resolveTocConfig,
+} from './toc-generation';
+import type { TocConfig, TocEntry } from './toc-model';
 
 /** Altura útil del cuerpo de página (unidades internas). */
 export const PAGE_BODY_HEIGHT_UNITS = 920;
@@ -21,6 +27,9 @@ export const PAGE_BODY_WIDTH_UNITS  = 560;
 
 const GAP_AFTER_BLOCK = 12;
 const CHARS_PER_LINE  = 54;
+const TOC_ENTRY_UNITS = 26;
+const TOC_TITLE_UNITS = 52;
+const TOC_EMPTY_UNITS = 28;
 
 function estimateLines(text: string): number {
   const t = text.replace(/\r\n/g, '\n');
@@ -64,6 +73,12 @@ function estimateBlockHeight(block: DocumentBlock): number {
     default:
       return estimateParagraphUnits(block.contentText);
   }
+}
+
+function estimateTocUnits(entryCount: number, includeTitle: boolean): number {
+  const titleUnits = includeTitle ? TOC_TITLE_UNITS : 0;
+  const bodyUnits = entryCount > 0 ? entryCount * TOC_ENTRY_UNITS : TOC_EMPTY_UNITS;
+  return titleUnits + bodyUnits;
 }
 
 /** Reservado para reglas por tipo (COVER, TOC…); v1: toda sección tras la primera abre en página nueva. */
@@ -225,6 +240,68 @@ class Paginator {
     return { first, rest };
   }
 
+  placeToc(
+    section: DocumentSection,
+    tocEntries: TocEntry[],
+    tocConfig: TocConfig,
+  ): void {
+    let index = 0;
+    let showTitleInChunk = tocConfig.showTitle;
+    const maxEntriesPerFreshPage = Math.max(
+      1,
+      Math.floor((PAGE_BODY_HEIGHT_UNITS - (showTitleInChunk ? TOC_TITLE_UNITS : 0)) / TOC_ENTRY_UNITS),
+    );
+
+    if (tocEntries.length === 0) {
+      const height = estimateTocUnits(0, showTitleInChunk);
+      if (height > this.remaining() && this.used > 0) {
+        this.startNewContentPage('Continuación de TOC');
+      }
+      this.placePlacement(section, {
+        block: null,
+        estimatedUnits: height,
+        tocEntries: [],
+        tocConfig: { ...tocConfig, showTitle: showTitleInChunk },
+        syntheticType: 'TOC',
+      }, height);
+      return;
+    }
+
+    while (index < tocEntries.length) {
+      if (this.remaining() < TOC_ENTRY_UNITS * 2 && this.used > 0) {
+        this.startNewContentPage('Continuación de TOC');
+      }
+
+      const availableUnits = this.remaining() - (showTitleInChunk ? TOC_TITLE_UNITS : 0);
+      const fitCount = Math.max(
+        1,
+        Math.min(
+          tocEntries.length - index,
+          Math.floor(Math.max(availableUnits, TOC_ENTRY_UNITS) / TOC_ENTRY_UNITS),
+        ),
+      );
+      const chunkCount = Math.min(fitCount, maxEntriesPerFreshPage);
+      const chunk = tocEntries.slice(index, index + chunkCount);
+      const height = estimateTocUnits(chunk.length, showTitleInChunk);
+
+      if (height > this.remaining() && this.used > 0) {
+        this.startNewContentPage('Continuación de TOC');
+        continue;
+      }
+
+      this.placePlacement(section, {
+        block: null,
+        estimatedUnits: height,
+        tocEntries: chunk,
+        tocConfig: { ...tocConfig, showTitle: showTitleInChunk },
+        syntheticType: 'TOC',
+      }, height);
+
+      index += chunk.length;
+      showTitleInChunk = false;
+    }
+  }
+
   placeBlock(block: DocumentBlock, section: DocumentSection, next: DocumentBlock | undefined): void {
     if (this.forceNext) {
       this.startNewContentPage('Salto pendiente (pageBreakAfter anterior)');
@@ -325,11 +402,31 @@ class Paginator {
   }
 }
 
-/**
- * Construye el layout paginado completo del libro.
- */
-export function buildPaginatedLayout(snapshot: BookLayoutSnapshot): PaginatedBookResult {
-  const sections = [...snapshot.sections].sort((a, b) => a.orderIndex - b.orderIndex);
+function applyEditorialMetadata(
+  pages: RenderedPage[],
+  snapshot: BookLayoutSnapshot,
+  sections: DocumentSection[],
+): void {
+  const editorialFrames = buildEditorialFrames({
+    pages,
+    sections,
+    bookTitle: snapshot.bookTitle,
+    settings: snapshot.layoutSettings,
+  });
+  pages.forEach((page, index) => {
+    const frame = editorialFrames[index];
+    page.editorial = frame;
+    page.editorialPageNumber = frame.editorialOrdinal;
+    page.editorialPageLabel = frame.editorialLabel;
+  });
+}
+
+function paginateBookPass(
+  snapshot: BookLayoutSnapshot,
+  sections: DocumentSection[],
+  tocEntries: TocEntry[],
+  tocConfig: TocConfig,
+): RenderedPage[] {
   const pag = new Paginator(snapshot.bookId);
 
   let first = true;
@@ -340,30 +437,62 @@ export function buildPaginatedLayout(snapshot: BookLayoutSnapshot): PaginatedBoo
     pag.beginSection(section, first);
     first = false;
 
+    const autoInsertTocAtSectionStart =
+      section.sectionType === 'TOC' && !blocks.some(block => blockContainsTocMarker(block.contentText));
+
+    if (autoInsertTocAtSectionStart) {
+      pag.placeToc(section, tocEntries, tocConfig);
+    }
+
     for (let i = 0; i < blocks.length; i++) {
       const block = blocks[i];
       const next  = blocks[i + 1];
+      if (section.sectionType === 'TOC' && blockContainsTocMarker(block.contentText)) {
+        pag.placeToc(section, tocEntries, tocConfig);
+        continue;
+      }
       pag.placeBlock(block, section, next);
     }
   }
 
   pag.finalize();
-  const editorialFrames = buildEditorialFrames({
-    pages: pag.pages,
-    sections,
-    bookTitle: snapshot.bookTitle,
-    settings: snapshot.layoutSettings,
-  });
-  pag.pages.forEach((page, index) => {
-    const frame = editorialFrames[index];
-    page.editorial = frame;
-    page.editorialPageNumber = frame.editorialOrdinal;
-    page.editorialPageLabel = frame.editorialLabel;
-  });
+  applyEditorialMetadata(pag.pages, snapshot, sections);
+  return pag.pages;
+}
+
+function tocEntriesSignature(entries: TocEntry[]): string {
+  return entries.map(entry => `${entry.targetSectionId}:${entry.pageNumberVisible ?? ''}:${entry.label}`).join('|');
+}
+
+/**
+ * Construye el layout paginado completo del libro.
+ */
+export function buildPaginatedLayout(snapshot: BookLayoutSnapshot): PaginatedBookResult {
+  const sections = [...snapshot.sections].sort((a, b) => a.orderIndex - b.orderIndex);
+  const tocConfig = resolveTocConfig(snapshot.layoutSettings.tocConfigJson);
+
+  let tocEntries: TocEntry[] = [];
+  let pages: RenderedPage[] = [];
+  let lastSignature = '';
+
+  for (let pass = 0; pass < 4; pass++) {
+    pages = paginateBookPass(snapshot, sections, tocEntries, tocConfig);
+    const nextEntries = buildTocEntries({ sections, pages });
+    const signature = tocEntriesSignature(nextEntries);
+    if (signature === lastSignature) {
+      tocEntries = nextEntries;
+      break;
+    }
+    tocEntries = nextEntries;
+    lastSignature = signature;
+  }
+
+  pages = paginateBookPass(snapshot, sections, tocEntries, tocConfig);
 
   return {
     bookId: snapshot.bookId,
-    pages:  pag.pages,
+    pages,
+    tocEntries,
     pageBodyHeightUnits: PAGE_BODY_HEIGHT_UNITS,
     pageBodyWidthUnits:  PAGE_BODY_WIDTH_UNITS,
   };

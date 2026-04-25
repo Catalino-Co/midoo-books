@@ -5,6 +5,12 @@ import type {
   FrontmatterNumberingStyle,
 } from '$lib/core/domain/index';
 import { DEFAULT_HIDE_PAGE_NUMBER_SECTION_TYPES } from '$lib/core/domain/index';
+import {
+  parseTocConfig,
+  serializeTocConfig,
+  DEFAULT_TOC_CONFIG,
+  type TocConfig,
+} from '$lib/core/editorial/toc-model';
 
 export async function getLayoutSettings(bookId: string): Promise<LayoutSettings> {
   return getPlatformAdapter().getLayoutSettingsByBookId(bookId);
@@ -43,3 +49,13 @@ export function parseHiddenPageNumberSectionTypes(rawJson: string): string[] {
   }
   return [...DEFAULT_HIDE_PAGE_NUMBER_SECTION_TYPES];
 }
+
+export function parseLayoutTocConfig(rawJson: string | null | undefined): TocConfig {
+  return parseTocConfig(rawJson);
+}
+
+export function serializeLayoutTocConfig(config: TocConfig): string {
+  return serializeTocConfig(config);
+}
+
+export { DEFAULT_TOC_CONFIG, type TocConfig };

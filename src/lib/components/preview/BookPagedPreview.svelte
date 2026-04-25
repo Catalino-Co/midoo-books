@@ -34,7 +34,7 @@
   }
 
   function bodyText(pl: PlacedBlock): string {
-    return pl.textOverride ?? pl.block.contentText;
+    return pl.textOverride ?? pl.block?.contentText ?? '';
   }
 </script>
 
@@ -114,10 +114,31 @@
               <p class="blank-label">Página en blanco editorial</p>
               <p class="blank-hint">Forzada por reglas de inicio en recto u otras reglas v1.</p>
             {:else}
-              {#each activePage.placements as pl, pi (`${pl.block.id}-${pi}-${pl.textOverride ?? ''}`)}
-                {@const L = resolveBlockLayout(pl.block)}
-                <div class="flow-block flow-block--{pl.block.blockType}">
-                  {#if pl.block.blockType === 'CHAPTER_OPENING'}
+              {#each activePage.placements as pl, pi (`${pl.block?.id ?? pl.syntheticType ?? 'synthetic'}-${pi}-${pl.textOverride ?? ''}`)}
+                {@const L = pl.block ? resolveBlockLayout(pl.block) : null}
+                <div class="flow-block flow-block--{pl.block?.blockType ?? pl.syntheticType ?? 'SYNTHETIC'}">
+                  {#if pl.syntheticType === 'TOC'}
+                    <section class="toc-render">
+                      {#if pl.tocConfig?.showTitle}
+                        <h2 class="toc-render__title">{pl.tocConfig.titleText}</h2>
+                      {/if}
+                      {#if pl.tocEntries && pl.tocEntries.length > 0}
+                        <div class="toc-render__list">
+                          {#each pl.tocEntries as entry (`${entry.targetSectionId}-${entry.orderIndex}`)}
+                            <div class="toc-render__row">
+                              <span class="toc-render__label">{entry.label}</span>
+                              {#if pl.tocConfig?.showDotLeaders}
+                                <span class="toc-render__dots" aria-hidden="true"></span>
+                              {/if}
+                              <span class="toc-render__page">{entry.pageNumberVisible ?? '—'}</span>
+                            </div>
+                          {/each}
+                        </div>
+                      {:else}
+                        <p class="toc-render__empty">Todavía no hay entradas para mostrar.</p>
+                      {/if}
+                    </section>
+                  {:else if pl.block?.blockType === 'CHAPTER_OPENING'}
                     {@const co = parseChapterOpeningContent(pl.block.contentJson)}
                     <div class="co-render {chapterOpeningPreviewRootClassNames(co)}">
                       {#if co.assetId}
@@ -139,7 +160,7 @@
                         {/if}
                       </div>
                     </div>
-                  {:else if pl.block.blockType === 'IMAGE'}
+                  {:else if pl.block?.blockType === 'IMAGE'}
                     {@const im = parseImageBlockContent(pl.block.contentJson)}
                     {@const u = assetUrlFor(im.assetId)}
                     <figure class="img-render">
@@ -152,18 +173,18 @@
                         <figcaption>{im.caption}</figcaption>
                       {/if}
                     </figure>
-                  {:else if pl.block.blockType === 'HEADING_1'}
-                    <h1 class="flow-h1" style:text-align={L.textAlign}>{bodyText(pl)}</h1>
-                  {:else if pl.block.blockType === 'HEADING_2'}
-                    <h2 class="flow-h2" style:text-align={L.textAlign}>{bodyText(pl)}</h2>
-                  {:else if pl.block.blockType === 'QUOTE'}
-                    <blockquote class="flow-quote" style:text-align={L.textAlign}>{bodyText(pl)}</blockquote>
-                  {:else if pl.block.blockType === 'SEPARATOR'}
+                  {:else if pl.block?.blockType === 'HEADING_1'}
+                    <h1 class="flow-h1" style:text-align={L?.textAlign}>{bodyText(pl)}</h1>
+                  {:else if pl.block?.blockType === 'HEADING_2'}
+                    <h2 class="flow-h2" style:text-align={L?.textAlign}>{bodyText(pl)}</h2>
+                  {:else if pl.block?.blockType === 'QUOTE'}
+                    <blockquote class="flow-quote" style:text-align={L?.textAlign}>{bodyText(pl)}</blockquote>
+                  {:else if pl.block?.blockType === 'SEPARATOR'}
                     <hr class="flow-sep" />
-                  {:else if pl.block.blockType === 'CENTERED_PHRASE'}
-                    <p class="flow-center" style:text-align={L.textAlign}>{bodyText(pl)}</p>
+                  {:else if pl.block?.blockType === 'CENTERED_PHRASE'}
+                    <p class="flow-center" style:text-align={L?.textAlign}>{bodyText(pl)}</p>
                   {:else}
-                    <p class="flow-p" style:text-align={L.textAlign}>{bodyText(pl)}</p>
+                    <p class="flow-p" style:text-align={L?.textAlign}>{bodyText(pl)}</p>
                   {/if}
                 </div>
               {/each}
@@ -426,6 +447,50 @@
     border: none;
     border-top: 1px solid rgba(0, 0, 0, 0.12);
     margin: 1em 0;
+  }
+
+  .toc-render {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 0.4em 0 0.8em;
+  }
+  .toc-render__title {
+    margin: 0 0 0.3em;
+    font-size: 1.2rem;
+    font-weight: 700;
+    text-align: center;
+  }
+  .toc-render__list {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .toc-render__row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 13px;
+    line-height: 1.35;
+  }
+  .toc-render__label {
+    min-width: 0;
+  }
+  .toc-render__dots {
+    flex: 1;
+    border-bottom: 1px dotted rgba(0, 0, 0, 0.35);
+    transform: translateY(-2px);
+  }
+  .toc-render__page {
+    min-width: 1.8rem;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .toc-render__empty {
+    margin: 0;
+    font-size: 12px;
+    color: rgba(0, 0, 0, 0.42);
+    font-style: italic;
   }
 
   .img-render {
