@@ -143,6 +143,8 @@
     blocks.find(b => b.id === selectedBlockId) ?? null
   );
   let selectedSectionRules = $derived(selectedSection ? resolveSectionEditorialRules(selectedSection) : null);
+  let newSectionPreset = $derived(getSectionEditorialPreset(newSectionType));
+  let inspectorSectionPreset = $derived(getSectionEditorialPreset(insp_sType));
 
   // Inspector: ¿qué mostrar?
   let inspectorMode = $derived<'section' | 'block' | 'none'>(
@@ -810,7 +812,6 @@
             disabled={savingNewSection}
             onchange={onNewSectionTypeChange}
           />
-          {@const newSectionPreset = getSectionEditorialPreset(newSectionType)}
           <p class="modal-hint modal-hint--insert">
             Preset: TOC {newSectionPreset.includeInToc ? 'sí' : 'no'} · recto {newSectionPreset.startOnRightPage ? 'sí' : 'no'} ·
             folio {newSectionPreset.showPageNumber ? 'visible' : 'oculto'} · {sectionOpeningBehaviorLabel(newSectionPreset.defaultOpeningBehavior)}
@@ -1419,33 +1420,32 @@
             />
           </div>
 
-          {@const currentPreset = getSectionEditorialPreset(insp_sType)}
           <div class="insp-preset-card">
             <div class="insp-preset-title">Preset editorial del tipo</div>
             <div class="insp-preset-grid">
               <span class="insp-preset-chip" class:insp-preset-chip--override={selectedSection ? sectionPropertyIsOverridden(selectedSection, 'includeInToc') : false}>
-                TOC: {currentPreset.includeInToc ? 'sí' : 'no'}
+                TOC: {inspectorSectionPreset.includeInToc ? 'sí' : 'no'}
               </span>
               <span class="insp-preset-chip" class:insp-preset-chip--override={selectedSection ? sectionPropertyIsOverridden(selectedSection, 'startOnRightPage') : false}>
-                Recto: {currentPreset.startOnRightPage ? 'sí' : 'no'}
+                Recto: {inspectorSectionPreset.startOnRightPage ? 'sí' : 'no'}
               </span>
               <span class="insp-preset-chip">
-                Folio: {currentPreset.showPageNumber ? 'visible' : 'oculto'}
+                Folio: {inspectorSectionPreset.showPageNumber ? 'visible' : 'oculto'}
               </span>
               <span class="insp-preset-chip">
-                Cabecera: {currentPreset.allowHeader ? 'permitida' : 'oculta'}
+                Cabecera: {inspectorSectionPreset.allowHeader ? 'permitida' : 'oculta'}
               </span>
               <span class="insp-preset-chip">
-                Pie: {currentPreset.allowFooter ? 'permitido' : 'oculto'}
+                Pie: {inspectorSectionPreset.allowFooter ? 'permitido' : 'oculto'}
               </span>
               <span class="insp-preset-chip">
-                Apertura: {sectionOpeningBehaviorLabel(currentPreset.defaultOpeningBehavior)}
+                Apertura: {sectionOpeningBehaviorLabel(inspectorSectionPreset.defaultOpeningBehavior)}
               </span>
               <span class="insp-preset-chip">
-                Alineación: {sectionDefaultTextAlignLabel(currentPreset.defaultTextAlign)}
+                Alineación: {sectionDefaultTextAlignLabel(inspectorSectionPreset.defaultTextAlign)}
               </span>
               <span class="insp-preset-chip">
-                Página propia: {currentPreset.isStandalonePage ? 'sí' : 'no'}
+                Página propia: {inspectorSectionPreset.isStandalonePage ? 'sí' : 'no'}
               </span>
             </div>
             <p class="insp-preset-note">
