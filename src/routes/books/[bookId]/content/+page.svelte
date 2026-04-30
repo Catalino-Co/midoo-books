@@ -11,6 +11,7 @@
 
   import { onMount }   from 'svelte';
   import { page }      from '$app/stores';
+  import { goto }      from '$app/navigation';
   import {
     listSections, createSection, updateSection, deleteSection, moveSectionInList,
     duplicateSection,
@@ -73,6 +74,11 @@
     pickAndImportAssets,
     assetDisplayUrl,
   } from '$lib/services/assets.service';
+  import {
+    loadBookLayoutSnapshot,
+    computePaginatedPreview,
+    findPreviewLocationForSelection,
+  } from '$lib/services/preview-layout.service';
   import SectionTypeSelect from '$lib/components/SectionTypeSelect.svelte';
   import BookMarkdownImportModal from '$lib/components/BookMarkdownImportModal.svelte';
   import type {
@@ -95,6 +101,7 @@
   let loadingSections = $state(true);
   let loadingBlocks   = $state(false);
   let globalError     = $state<string | null>(null);
+  let openingPreview  = $state(false);
 
   // ── Modales y formularios ─────────────────────────────────────────────────
 
@@ -192,6 +199,7 @@
 
   // Suciedad del inspector
   let inspectorDirty = $state(false);
+  let lastSyncedContentQuery = $state('');
 
   // ── Carga inicial ─────────────────────────────────────────────────────────
   onMount(async () => {
@@ -265,10 +273,43 @@
       if (sections.length > 0 && !selectedSectionId) {
         await selectSection(sections[0].id);
       }
+      await syncSelectionFromRoute();
     } catch (e) {
       globalError = e instanceof Error ? e.message : String(e);
     } finally {
       loadingSections = false;
+    }
+  }
+
+  $effect(() => {
+    if (!loadingSections && sections.length > 0) {
+      void syncSelectionFromRoute();
+    }
+  });
+
+  async function syncSelectionFromRoute() {
+    const sectionId = $page.url.searchParams.get('sectionId');
+    const blockId = $page.url.searchParams.get('blockId');
+    const routeKey = `${sectionId ?? ''}::${blockId ?? ''}`;
+    if (!routeKey.replace(/:/g, '') || routeKey === lastSyncedContentQuery) return;
+
+    const routeSection = sectionId ? sections.find(section => section.id === sectionId) : null;
+    if (!routeSection) return;
+
+    lastSyncedContentQuery = routeKey;
+    if (selectedSectionId !== routeSection.id) {
+      await selectSection(routeSection.id);
+    }
+
+    if (blockId) {
+      const routeBlock = blocks.find(block => block.id === blockId);
+      if (routeBlock) {
+        selectedBlockId = routeBlock.id;
+        syncBlockToInspector(routeBlock);
+      }
+    } else {
+      selectedBlockId = null;
+      syncSectionToInspector();
     }
   }
 
@@ -308,6 +349,28 @@
     await flushInspectorIfNeeded();
     selectedBlockId = null;
     syncSectionToInspector();
+  }
+
+  async function openCurrentSelectionInPreview() {
+    if (openingPreview || !selectedSectionId) return;
+    openingPreview = true;
+    globalError = null;
+    try {
+      const snapshot = await loadBookLayoutSnapshot(bookId);
+      const layout = computePaginatedPreview(snapshot);
+      const target = findPreviewLocationForSelection(layout, {
+        sectionId: selectedSectionId,
+        blockId: selectedBlockId,
+      });
+      const href = target
+        ? `/books/${bookId}/preview?page=${target.physicalPageNumber}`
+        : `/books/${bookId}/preview`;
+      await goto(href);
+    } catch (e) {
+      globalError = e instanceof Error ? e.message : String(e);
+    } finally {
+      openingPreview = false;
+    }
   }
 
   async function flushInspectorIfNeeded() {
@@ -1093,6 +1156,15 @@
     <div class="panel-header">
       <span class="panel-title">Estructura</span>
       <div class="panel-header-actions">
+        <button
+          type="button"
+          class="btn btn--sm btn--ghost"
+          onclick={() => void openCurrentSelectionInPreview()}
+          disabled={openingPreview || !selectedSectionId}
+          title="Abrir en preview la página de la selección actual"
+        >
+          {openingPreview ? 'Abriendo…' : 'Vista previa aquí'}
+        </button>
         <button
           type="button"
           class="btn btn--sm btn--ghost"
@@ -1970,6 +2042,14 @@
     <!-- Footer del inspector: botón guardar -->
     {#if inspectorMode !== 'none'}
       <div class="panel-footer inspector-footer">
+        <button
+          class="btn btn--ghost btn--full"
+          type="button"
+          onclick={() => void openCurrentSelectionInPreview()}
+          disabled={openingPreview || !selectedSectionId}
+        >
+          {openingPreview ? 'Abriendo preview…' : 'Ir a esta página en preview'}
+        </button>
         {#if inspectorError}
           <div class="alert alert--error alert--compact">{inspectorError}</div>
         {/if}

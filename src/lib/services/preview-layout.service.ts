@@ -33,3 +33,36 @@ export async function loadBookLayoutSnapshot(bookId: string): Promise<BookLayout
 export function computePaginatedPreview(snapshot: BookLayoutSnapshot): PaginatedBookResult {
   return buildPaginatedLayout(snapshot);
 }
+
+export interface PreviewLocationTarget {
+  physicalPageNumber: number;
+  sectionId: string | null;
+  blockId: string | null;
+}
+
+export function findPreviewLocationForSelection(
+  layout: PaginatedBookResult,
+  params: {
+    sectionId?: string | null;
+    blockId?: string | null;
+  },
+): PreviewLocationTarget | null {
+  const blockId = params.blockId?.trim() || null;
+  const sectionId = params.sectionId?.trim() || null;
+
+  const page = blockId
+    ? layout.pages.find(candidate => candidate.placements.some(placement => placement.block?.id === blockId))
+    : sectionId
+      ? layout.pages.find(candidate => candidate.primarySectionId === sectionId)
+      : null;
+
+  if (!page) return null;
+
+  const firstBlockId = page.placements.find(placement => placement.block?.id)?.block?.id ?? null;
+
+  return {
+    physicalPageNumber: page.physicalPageNumber,
+    sectionId: page.primarySectionId,
+    blockId: firstBlockId,
+  };
+}

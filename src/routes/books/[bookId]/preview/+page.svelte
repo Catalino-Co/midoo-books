@@ -7,6 +7,11 @@
   import type { Asset } from '$lib/core/domain/asset';
 
   let bookId = $derived($page.params.bookId);
+  let requestedPhysicalPage = $derived.by(() => {
+    const raw = $page.url.searchParams.get('page');
+    const value = raw ? Number.parseInt(raw, 10) : NaN;
+    return Number.isFinite(value) && value > 0 ? value : 1;
+  });
 
   let loading   = $state(true);
   let loadError = $state<string | null>(null);
@@ -50,7 +55,7 @@
   {:else if loading || !layout}
     <div class="loading">Cargando libro…</div>
   {:else}
-    <BookPagedPreview {bookId} {layout} {assets} />
+    <BookPagedPreview {bookId} {layout} {assets} initialPhysicalPage={requestedPhysicalPage} />
   {/if}
 </div>
 

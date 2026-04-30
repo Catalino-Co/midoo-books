@@ -16,14 +16,21 @@
   let {
     bookId,
     layout,
+    initialPhysicalPage = 1,
     assets = [],
   }: {
     bookId: string;
     layout: PaginatedBookResult;
+    initialPhysicalPage?: number;
     assets?: Asset[];
   } = $props();
 
   let activeIndex = $state(0);
+
+  $effect(() => {
+    const nextIndex = layout.pages.findIndex(page => page.physicalPageNumber === initialPhysicalPage);
+    activeIndex = nextIndex >= 0 ? nextIndex : 0;
+  });
 
   let activePage = $derived(layout.pages[Math.min(activeIndex, Math.max(0, layout.pages.length - 1))] ?? null);
 
@@ -45,6 +52,20 @@
 
   function pageUsesFullPageImage(page: RenderedPage): boolean {
     return page.placements.some(pl => isFullPageImage(page, pl));
+  }
+
+  function firstEditableBlockId(page: RenderedPage): string | null {
+    return page.placements.find(pl => pl.block?.id)?.block?.id ?? null;
+  }
+
+  function contentHrefForPage(page: RenderedPage): string | null {
+    if (!page.primarySectionId) return null;
+    const url = new URL(`/books/${bookId}/content`, 'https://midoo.local');
+    url.searchParams.set('sectionId', page.primarySectionId);
+    url.searchParams.set('page', String(page.physicalPageNumber));
+    const blockId = firstEditableBlockId(page);
+    if (blockId) url.searchParams.set('blockId', blockId);
+    return `${url.pathname}${url.search}`;
   }
 </script>
 
@@ -80,6 +101,9 @@
             {/if}
           </span>
           <div class="toolbar-nav">
+            {#if contentHrefForPage(activePage)}
+              <a class="btn-mini btn-mini--jump" href={contentHrefForPage(activePage) ?? '#'}>Contenido</a>
+            {/if}
             <button
               type="button"
               class="btn-mini"
@@ -237,9 +261,13 @@
 
 <style>
   .paged-root {
+    --page-w: min(440px, 94vw);
+    --page-h: calc(var(--page-w) * 1.414);
+    --preview-toolbar-h: 30px;
+    --preview-toolbar-gap: 10px;
     display: flex;
     gap: 16px;
-    align-items: flex-start;
+    align-items: stretch;
     width: 100%;
     max-width: 1100px;
     margin: 0 auto;
@@ -255,7 +283,8 @@
     flex-direction: column;
     gap: 8px;
     width: 92px;
-    max-height: min(72vh, 560px);
+    height: calc(var(--page-h) + var(--preview-toolbar-h) + var(--preview-toolbar-gap));
+    max-height: calc(var(--page-h) + var(--preview-toolbar-h) + var(--preview-toolbar-gap));
     overflow-y: auto;
     flex-shrink: 0;
     padding: 6px;
@@ -312,6 +341,7 @@
   }
 
   .page-toolbar {
+    min-height: var(--preview-toolbar-h);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -327,6 +357,9 @@
     gap: 6px;
   }
   .btn-mini {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     width: 34px;
     height: 30px;
     border-radius: 6px;
@@ -335,6 +368,17 @@
     color: #fff;
     cursor: pointer;
     font-size: 14px;
+    text-decoration: none;
+    font-family: inherit;
+  }
+  .btn-mini--jump {
+    width: auto;
+    min-width: 78px;
+    padding: 0 10px;
+    font-size: 12px;
+    color: #c8e6ff;
+    border-color: rgba(122, 184, 232, 0.32);
+    background: rgba(122, 184, 232, 0.12);
   }
   .btn-mini:disabled {
     opacity: 0.35;
@@ -342,8 +386,6 @@
   }
 
   .page-sheet {
-    --page-w: min(440px, 94vw);
-    --page-h: calc(var(--page-w) * 1.414);
     width: var(--page-w);
     height: var(--page-h);
     min-height: var(--page-h);
