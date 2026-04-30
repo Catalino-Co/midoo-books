@@ -17,6 +17,9 @@ export type LayoutSettingsId = string & { readonly [LayoutSettingsIdBrand]: neve
 
 export type PageUnit = 'mm' | 'in' | 'pt' | 'px';
 
+/** Preset de trim size; CUSTOM = medidas manuales. */
+export type PageSizePresetId = 'A5' | 'LETTER' | 'TRADE_6X9' | 'A4' | 'CUSTOM';
+
 export type FrontmatterNumberingStyle = 'none' | 'roman-lower' | 'roman-upper';
 export type BodyNumberingStyle = 'arabic';
 
@@ -37,6 +40,13 @@ export interface LayoutSettings {
   marginInside:             number;             // Interior (lomo) en doble cara
   marginOutside:            number;             // Exterior (corte)
   facingPages:              boolean;            // ¿Márgenes espejo para doble cara?
+
+  /** Preset de tamaño (UI); no sustituye pageWidth/pageHeight al renderizar. */
+  pageSizePreset:           PageSizePresetId;
+  /** Sangrado hacia fuera del corte (mm). 0 = desactivado; base para bleed real en fases futuras. */
+  bleedMm:                  number;
+  /** Inset uniforme (mm) dentro del área útil para guía de zona segura en preview. */
+  safeAreaInsetMm:          number;
 
   // ── Tipografía cuerpo ────────────────────────────────────────────────────
   bodyFontFamily:           string;             // Nombre de familia tipográfica
@@ -95,6 +105,9 @@ export const DEFAULT_LAYOUT_SETTINGS: Omit<LayoutSettings, 'id' | 'bookId' | 'cr
   marginInside:             22,
   marginOutside:            18,
   facingPages:              true,
+  pageSizePreset:           'A5',
+  bleedMm:                  0,
+  safeAreaInsetMm:          0,
   bodyFontFamily:           'Georgia, serif',
   headingFontFamily:        'Helvetica Neue, Arial, sans-serif',
   bodyFontSize:             11,

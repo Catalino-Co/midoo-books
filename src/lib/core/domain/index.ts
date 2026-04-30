@@ -52,6 +52,7 @@ export {
 export type {
   LayoutSettingsId,
   PageUnit,
+  PageSizePresetId,
   FrontmatterNumberingStyle,
   BodyNumberingStyle,
   LayoutSettings,

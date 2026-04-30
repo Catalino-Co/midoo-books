@@ -11,8 +11,9 @@
     parseLayoutTocConfig,
     serializeLayoutTocConfig,
   } from '$lib/services/layout.service';
-  import type { DocumentSection, SectionType, FrontmatterNumberingStyle } from '$lib/core/domain/index';
+  import type { DocumentSection, SectionType, FrontmatterNumberingStyle, PageSizePresetId, PageUnit } from '$lib/core/domain/index';
   import { DEFAULT_HIDE_PAGE_NUMBER_SECTION_TYPES } from '$lib/core/domain/index';
+  import { PAGE_SIZE_PRESETS, getPageSizePresetDefinition } from '$lib/core/editorial/page-size-presets';
 
   let bookId = $derived($page.params.bookId);
 
@@ -33,6 +34,18 @@
   let tocShowTitle = $state(true);
   let tocTitleText = $state('Índice');
   let tocShowDotLeaders = $state(true);
+
+  let pageSizePreset = $state<PageSizePresetId>('A5');
+  let pageUnit = $state<PageUnit>('mm');
+  let pageWidth = $state(148);
+  let pageHeight = $state(210);
+  let marginTop = $state(20);
+  let marginBottom = $state(22);
+  let marginInside = $state(22);
+  let marginOutside = $state(18);
+  let facingPages = $state(true);
+  let bleedMm = $state(0);
+  let safeAreaInsetMm = $state(0);
 
   const hideTypeOptions: SectionType[] = ['COVER', 'BACK_COVER', 'RIGHTS', 'DEDICATION', 'TOC'];
 
@@ -60,6 +73,17 @@
       tocShowTitle = tocConfig.showTitle;
       tocTitleText = tocConfig.titleText;
       tocShowDotLeaders = tocConfig.showDotLeaders;
+      pageSizePreset = layout.pageSizePreset;
+      pageUnit = layout.pageUnit;
+      pageWidth = layout.pageWidth;
+      pageHeight = layout.pageHeight;
+      marginTop = layout.marginTop;
+      marginBottom = layout.marginBottom;
+      marginInside = layout.marginInside;
+      marginOutside = layout.marginOutside;
+      facingPages = layout.facingPages;
+      bleedMm = layout.bleedMm ?? 0;
+      safeAreaInsetMm = layout.safeAreaInsetMm ?? 0;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -73,12 +97,44 @@
       : hiddenTypes.filter(value => value !== type);
   }
 
+  function applyPreset(id: Exclude<PageSizePresetId, 'CUSTOM'>): void {
+    const def = getPageSizePresetDefinition(id);
+    pageWidth = def.widthMm;
+    pageHeight = def.heightMm;
+    pageUnit = 'mm';
+    pageSizePreset = id;
+  }
+
+  function markCustomIfDimensionsEdited(): void {
+    if (pageSizePreset === 'CUSTOM') return;
+    const def = PAGE_SIZE_PRESETS.find(p => p.id === pageSizePreset);
+    if (!def) return;
+    if (
+      Math.abs(pageWidth - def.widthMm) > 0.01
+      || Math.abs(pageHeight - def.heightMm) > 0.01
+      || pageUnit !== 'mm'
+    ) {
+      pageSizePreset = 'CUSTOM';
+    }
+  }
+
   async function saveSettings() {
     saving = true;
     error = null;
     saveOk = false;
     try {
       await updateLayoutSettings(bookId, {
+        pageSizePreset,
+        pageUnit,
+        pageWidth: Math.max(1, pageWidth),
+        pageHeight: Math.max(1, pageHeight),
+        marginTop: Math.max(0, marginTop),
+        marginBottom: Math.max(0, marginBottom),
+        marginInside: Math.max(0, marginInside),
+        marginOutside: Math.max(0, marginOutside),
+        facingPages,
+        bleedMm: Math.max(0, bleedMm),
+        safeAreaInsetMm: Math.max(0, safeAreaInsetMm),
         showPageNumbers,
         frontmatterNumberingStyle: frontmatterStyle,
         pageNumberStart: Math.max(1, Math.floor(pageNumberStart || 1)),
@@ -116,9 +172,9 @@
 <div class="layout-page">
   <header class="page-head">
     <div>
-      <h1 class="page-title">Numeración editorial</h1>
+      <h1 class="page-title">Maqueta y documento</h1>
       <p class="page-lead">
-        Configura preliminares, comienzo del cuerpo y pie/cabecera básicos para la vista previa paginada.
+        Formato físico de la página (trim size, márgenes, doble cara) y ajustes de numeración / cabecera para la vista previa paginada.
       </p>
     </div>
     <a class="preview-link" href="/books/{bookId}/preview">Abrir preview</a>
@@ -128,6 +184,117 @@
     <div class="state-box">Cargando ajustes editoriales…</div>
   {:else}
     <div class="layout-grid">
+      <section class="panel panel--wide">
+        <h2 class="panel-title">Formato del documento</h2>
+        <p class="panel-lead">
+          Tamaño de hoja, márgenes y doble cara. Los cambios se reflejan al guardar y recargar la vista previa paginada.
+        </p>
+
+        <div class="field">
+          <label for="page-preset">Tamaño de página</label>
+          <select
+            id="page-preset"
+            class="input"
+            value={pageSizePreset}
+            onchange={(e) => {
+              const v = (e.currentTarget as HTMLSelectElement).value as PageSizePresetId;
+              pageSizePreset = v;
+              if (v !== 'CUSTOM') applyPreset(v as Exclude<PageSizePresetId, 'CUSTOM'>);
+            }}
+          >
+            {#each PAGE_SIZE_PRESETS as p}
+              <option value={p.id}>{p.label}</option>
+            {/each}
+            <option value="CUSTOM">Personalizado (ancho / alto manual)</option>
+          </select>
+        </div>
+
+        <div class="field-row">
+          <div class="field field--grow">
+            <label for="page-w">Ancho</label>
+            <input
+              id="page-w"
+              class="input"
+              type="number"
+              min="1"
+              step="0.1"
+              bind:value={pageWidth}
+              oninput={() => markCustomIfDimensionsEdited()}
+            />
+          </div>
+          <div class="field field--grow">
+            <label for="page-h">Alto</label>
+            <input
+              id="page-h"
+              class="input"
+              type="number"
+              min="1"
+              step="0.1"
+              bind:value={pageHeight}
+              oninput={() => markCustomIfDimensionsEdited()}
+            />
+          </div>
+          <div class="field field--narrow">
+            <label for="page-unit">Unidad</label>
+            <select
+              id="page-unit"
+              class="input"
+              bind:value={pageUnit}
+              onchange={() => markCustomIfDimensionsEdited()}
+            >
+              <option value="mm">mm</option>
+              <option value="in">in</option>
+              <option value="pt">pt</option>
+              <option value="px">px</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field field--grow">
+            <label for="m-top">Margen superior</label>
+            <input id="m-top" class="input" type="number" min="0" step="0.5" bind:value={marginTop} />
+          </div>
+          <div class="field field--grow">
+            <label for="m-bottom">Margen inferior</label>
+            <input id="m-bottom" class="input" type="number" min="0" step="0.5" bind:value={marginBottom} />
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field field--grow">
+            <label for="m-in">Margen interior (lomo)</label>
+            <input id="m-in" class="input" type="number" min="0" step="0.5" bind:value={marginInside} />
+          </div>
+          <div class="field field--grow">
+            <label for="m-out">Margen exterior (corte)</label>
+            <input id="m-out" class="input" type="number" min="0" step="0.5" bind:value={marginOutside} />
+          </div>
+        </div>
+
+        <label class="toggle-row">
+          <span>
+            <strong>Páginas enfrentadas (interior / exterior)</strong>
+            <small>Activa márgenes espejo por verso y recto en preview y motor.</small>
+          </span>
+          <input type="checkbox" bind:checked={facingPages} />
+        </label>
+
+        <div class="field-row">
+          <div class="field field--grow">
+            <label for="bleed">Sangrado (mm, opcional)</label>
+            <input id="bleed" class="input" type="number" min="0" step="0.5" bind:value={bleedMm} />
+          </div>
+          <div class="field field--grow">
+            <label for="safe">Zona segura extra (mm)</label>
+            <input id="safe" class="input" type="number" min="0" step="0.5" bind:value={safeAreaInsetMm} />
+          </div>
+        </div>
+        <p class="field-help">
+          Sangrado y zona segura son visibles en preview como guías ligeras; la exportación a imprenta es fase futura.
+        </p>
+      </section>
+
       <section class="panel">
         <h2 class="panel-title">Numeración</h2>
 
@@ -357,6 +524,20 @@
     font-size: 12px;
     line-height: 1.5;
     color: rgba(255, 255, 255, 0.42);
+  }
+
+  .field-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .field--grow {
+    flex: 1 1 140px;
+  }
+
+  .field--narrow {
+    flex: 0 0 100px;
   }
 
   .field {

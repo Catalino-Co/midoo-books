@@ -17,6 +17,8 @@
  *   v5 — Tipos de bloque v1; document_blocks sin CHECK en block_type; datos migrados
  *   v6 — style_variant ampliado (variantes editoriales PARTE 7)
  *   v7 — assets: caption + tipo image (PARTE 8)
+ *   v8 — Numeración editorial en layout_settings (PARTE 10)
+ *   v9 — Formato físico: preset, bleed, safe area (PARTE 13)
  */
 
 import type { Database } from 'sql.js';
@@ -681,6 +683,31 @@ const migrations: Migration[] = [
       `);
 
       console.log('[DB] v8: layout_settings ampliada con numeración editorial básica.');
+    },
+  },
+
+  // ─── v9: Formato físico del documento — preset, bleed, safe area (PARTE 13)
+  {
+    version: 9,
+    name: 'document_physical_layout_p13',
+    up(db) {
+      db.run(`
+        ALTER TABLE layout_settings ADD COLUMN page_size_preset TEXT NOT NULL DEFAULT 'A5'
+      `);
+      db.run(`
+        ALTER TABLE layout_settings ADD COLUMN bleed_mm REAL NOT NULL DEFAULT 0
+      `);
+      db.run(`
+        ALTER TABLE layout_settings ADD COLUMN safe_area_inset_mm REAL NOT NULL DEFAULT 0
+      `);
+
+      db.run(`
+        INSERT OR REPLACE INTO app_settings (key, value) VALUES
+          ('appVersion',    '0.9.0'),
+          ('schemaVersion', '9')
+      `);
+
+      console.log('[DB] v9: layout_settings — preset de página, bleed y safe area.');
     },
   },
 

@@ -1,10 +1,11 @@
 /**
  * PARTE 9 — Motor de paginación v1 (preview editorial).
+ * PARTE 13 — Unidades de cuerpo derivadas de geometría física (márgenes + tamaño de hoja).
  *
  * Entrada: snapshot libro + secciones + bloques.
  * Salida: secuencia de `RenderedPage` con colocaciones y metadatos.
  *
- * Alturas en **unidades internas** (~px a escala fija); la UI escala proporcionalmente.
+ * Alturas en **unidades internas** escaladas desde el trim size; la UI refleja mm vía preview.
  * Sin DOM ni medición real: heurísticas estables para v1.
  */
 
@@ -20,18 +21,14 @@ import {
   resolveTocConfig,
 } from './toc-generation';
 import type { TocConfig, TocEntry } from './toc-model';
+import { computeLayoutEngineMetrics } from './document-layout-metrics';
+import type { LayoutEngineMetrics } from './page-layout-model';
 
-/**
- * Calibrado contra la preview actual:
- * - hoja ~440px de ancho
- * - cuerpo útil tras márgenes/rail/footer ~396px
- * - texto principal a 13px con line-height 1.55
- */
+/** Referencia histórica del motor v1 (A5 por defecto); el render real usa `engineMetrics`. */
 export const PAGE_BODY_HEIGHT_UNITS = 540;
 export const PAGE_BODY_WIDTH_UNITS  = 396;
 
 const GAP_AFTER_BLOCK = 10;
-const CHARS_PER_LINE  = 58;
 const PARAGRAPH_LINE_UNITS = 20;
 const QUOTE_LINE_UNITS = 20;
 const PARAGRAPH_TOP_UNITS = 16;
@@ -43,7 +40,7 @@ const TOC_ENTRY_UNITS = 26;
 const TOC_TITLE_UNITS = 52;
 const TOC_EMPTY_UNITS = 28;
 
-function wrapTextToLines(text: string): string[] {
+function wrapTextToLines(text: string, charsPerLine: number): string[] {
   const normalized = text.replace(/\r\n/g, '\n');
   if (!normalized.trim()) return [''];
 
@@ -61,7 +58,7 @@ function wrapTextToLines(text: string): string[] {
     let current = '';
     for (const word of words) {
       const candidate = current ? `${current} ${word}` : word;
-      if (candidate.length <= CHARS_PER_LINE || current === '') {
+      if (candidate.length <= charsPerLine || current === '') {
         current = candidate;
       } else {
         out.push(current);
@@ -74,8 +71,8 @@ function wrapTextToLines(text: string): string[] {
   return out.length > 0 ? out : [''];
 }
 
-function estimateLines(text: string): number {
-  return wrapTextToLines(text).length;
+function estimateLines(text: string, charsPerLine: number): number {
+  return wrapTextToLines(text, charsPerLine).length;
 }
 
 function estimateParagraphFragmentUnits(lineCount: number, continuedFromPreviousPage: boolean): number {
@@ -95,26 +92,26 @@ function maxParagraphLinesForUnits(
   return Math.max(0, Math.floor((maxUnits - topUnits) / PARAGRAPH_LINE_UNITS));
 }
 
-function estimateParagraphUnits(text: string): number {
-  const lines = estimateLines(text);
+function estimateParagraphUnits(text: string, charsPerLine: number): number {
+  const lines = estimateLines(text, charsPerLine);
   return estimateParagraphFragmentUnits(lines, false);
 }
 
-function estimateBlockHeight(block: DocumentBlock): number {
+function estimateBlockHeight(block: DocumentBlock, bodyH: number, charsPerLine: number): number {
   switch (block.blockType) {
     case 'HEADING_1':
-      return 48 + estimateLines(block.contentText) * 26;
+      return 48 + estimateLines(block.contentText, charsPerLine) * 26;
     case 'HEADING_2':
-      return 40 + estimateLines(block.contentText) * 22;
+      return 40 + estimateLines(block.contentText, charsPerLine) * 22;
     case 'PARAGRAPH':
-      return estimateParagraphUnits(block.contentText);
+      return estimateParagraphUnits(block.contentText, charsPerLine);
     case 'QUOTE':
-      return 20 + estimateLines(block.contentText) * 21;
+      return 20 + estimateLines(block.contentText, charsPerLine) * 21;
     case 'CENTERED_PHRASE':
-      return 28 + estimateLines(block.contentText) * 22;
+      return 28 + estimateLines(block.contentText, charsPerLine) * 22;
     case 'IMAGE': {
       const img = parseImageBlockContent(block.contentJson);
-      if (img.fillPage) return Math.floor(PAGE_BODY_HEIGHT_UNITS * 0.96);
+      if (img.fillPage) return Math.floor(bodyH * 0.96);
       return img.assetId ? 280 : 120;
     }
     case 'SEPARATOR':
@@ -122,9 +119,9 @@ function estimateBlockHeight(block: DocumentBlock): number {
     case 'PAGE_BREAK':
       return 0;
     case 'CHAPTER_OPENING':
-      return Math.floor(PAGE_BODY_HEIGHT_UNITS * 0.96);
+      return Math.floor(bodyH * 0.96);
     default:
-      return estimateParagraphUnits(block.contentText);
+      return estimateParagraphUnits(block.contentText, charsPerLine);
   }
 }
 
@@ -143,12 +140,14 @@ function sectionStartsOnFreshPage(_sectionType: SectionType, isFirstSection: boo
 class Paginator {
   readonly bookId: string;
   readonly pages: RenderedPage[] = [];
+  private readonly metrics: LayoutEngineMetrics;
   private currentIdx = 0;
   private used = 0;
   private forceNext = false;
 
-  constructor(bookId: string) {
+  constructor(bookId: string, metrics: LayoutEngineMetrics) {
     this.bookId = bookId;
+    this.metrics = metrics;
     this.appendContentPage();
   }
 
@@ -168,7 +167,7 @@ class Paginator {
       placements:         [],
       debugNotes:         [],
       layoutMeta: {
-        bodyHeightUnits: PAGE_BODY_HEIGHT_UNITS,
+        bodyHeightUnits: this.metrics.pageBodyHeightUnits,
         usedContentUnits: 0,
       },
       editorial: {
@@ -213,7 +212,7 @@ class Paginator {
   }
 
   remaining(): number {
-    return Math.max(0, PAGE_BODY_HEIGHT_UNITS - this.used);
+    return Math.max(0, this.metrics.pageBodyHeightUnits - this.used);
   }
 
   private startNewContentPage(note?: string): void {
@@ -283,7 +282,7 @@ class Paginator {
     maxUnits: number,
     continuedFromPreviousPage: boolean,
   ): { first: string; rest: string; lineCount: number; startLine: number } | null {
-    const lines = wrapTextToLines(text);
+    const lines = wrapTextToLines(text, this.metrics.charsPerLine);
     if (lines.length <= 1) return null;
 
     let fitLines = maxParagraphLinesForUnits(maxUnits, continuedFromPreviousPage);
@@ -316,10 +315,17 @@ class Paginator {
     if ((block.blockType !== 'HEADING_1' && block.blockType !== 'HEADING_2') || !next) return false;
     if (this.used === 0) return false;
 
-    const headingUnits = estimateBlockHeight(block);
+    const headingUnits = estimateBlockHeight(
+      block,
+      this.metrics.pageBodyHeightUnits,
+      this.metrics.charsPerLine,
+    );
     const nextUnits = next.blockType === 'PARAGRAPH'
       ? estimateParagraphFragmentUnits(HEADING_KEEP_WITH_NEXT_LINES, false)
-      : Math.min(estimateBlockHeight(next), 180);
+      : Math.min(
+        estimateBlockHeight(next, this.metrics.pageBodyHeightUnits, this.metrics.charsPerLine),
+        180,
+      );
 
     return headingUnits + GAP_AFTER_BLOCK + nextUnits > this.remaining();
   }
@@ -328,8 +334,8 @@ class Paginator {
     block: DocumentBlock,
     section: DocumentSection,
   ): void {
-    const totalUnits = estimateParagraphUnits(block.contentText);
-    const shouldKeepWhole = block.keepTogether && totalUnits <= PAGE_BODY_HEIGHT_UNITS;
+    const totalUnits = estimateParagraphUnits(block.contentText, this.metrics.charsPerLine);
+    const shouldKeepWhole = block.keepTogether && totalUnits <= this.metrics.pageBodyHeightUnits;
 
     if (shouldKeepWhole && totalUnits > this.remaining() && this.used > 0) {
       this.startNewContentPage('keepTogether en párrafo');
@@ -360,7 +366,7 @@ class Paginator {
 
       const split = this.splitParagraph(remainingText, this.remaining(), continued);
       if (!split) {
-        const lines = wrapTextToLines(remainingText);
+        const lines = wrapTextToLines(remainingText, this.metrics.charsPerLine);
         const h = estimateParagraphFragmentUnits(lines.length, continued);
         if (h > this.remaining() && this.used > 0) {
           this.startNewContentPage('Continuación de párrafo');
@@ -414,7 +420,9 @@ class Paginator {
     let showTitleInChunk = tocConfig.showTitle;
     const maxEntriesPerFreshPage = Math.max(
       1,
-      Math.floor((PAGE_BODY_HEIGHT_UNITS - (showTitleInChunk ? TOC_TITLE_UNITS : 0)) / TOC_ENTRY_UNITS),
+      Math.floor(
+        (this.metrics.pageBodyHeightUnits - (showTitleInChunk ? TOC_TITLE_UNITS : 0)) / TOC_ENTRY_UNITS,
+      ),
     );
 
     if (tocEntries.length === 0) {
@@ -489,7 +497,10 @@ class Paginator {
 
     if (block.blockType === 'CHAPTER_OPENING') {
       if (this.used > 0) this.startNewContentPage('CHAPTER_OPENING en página dedicada');
-      const h = Math.min(PAGE_BODY_HEIGHT_UNITS, estimateBlockHeight(block));
+      const h = Math.min(
+        this.metrics.pageBodyHeightUnits,
+        estimateBlockHeight(block, this.metrics.pageBodyHeightUnits, this.metrics.charsPerLine),
+      );
       const placed: PlacedBlock = {
         block,
         estimatedUnits: h,
@@ -504,7 +515,10 @@ class Paginator {
       const img = parseImageBlockContent(block.contentJson);
       if (img.fillPage) {
         if (this.used > 0) this.startNewContentPage('IMAGE a página completa');
-        const h = Math.min(PAGE_BODY_HEIGHT_UNITS, estimateBlockHeight(block));
+        const h = Math.min(
+          this.metrics.pageBodyHeightUnits,
+          estimateBlockHeight(block, this.metrics.pageBodyHeightUnits, this.metrics.charsPerLine),
+        );
         this.placePlacement(section, {
           block,
           estimatedUnits: h,
@@ -520,10 +534,14 @@ class Paginator {
       return;
     }
 
-    let h = estimateBlockHeight(block);
+    let h = estimateBlockHeight(block, this.metrics.pageBodyHeightUnits, this.metrics.charsPerLine);
 
     if (block.keepTogether && next) {
-      const combined = h + GAP_AFTER_BLOCK + estimateBlockHeight(next);
+      const combined = h + GAP_AFTER_BLOCK + estimateBlockHeight(
+        next,
+        this.metrics.pageBodyHeightUnits,
+        this.metrics.charsPerLine,
+      );
       if (combined > this.remaining()) {
         this.startNewContentPage('keepTogether con el bloque siguiente');
       }
@@ -532,10 +550,10 @@ class Paginator {
     if (h > this.remaining()) {
       if (this.used > 0) {
         this.startNewContentPage(
-          h > PAGE_BODY_HEIGHT_UNITS ? 'Bloque más alto que una página' : 'Desborde vertical',
+          h > this.metrics.pageBodyHeightUnits ? 'Bloque más alto que una página' : 'Desborde vertical',
         );
       }
-      h = estimateBlockHeight(block);
+      h = estimateBlockHeight(block, this.metrics.pageBodyHeightUnits, this.metrics.charsPerLine);
     }
 
     const placed: PlacedBlock = {
@@ -562,7 +580,7 @@ class Paginator {
       p.visualPageNumber   = i + 1;
       p.physicalPageNumber = i + 1;
       p.side               = pageSpreadSide(i);
-      p.layoutMeta.bodyHeightUnits = PAGE_BODY_HEIGHT_UNITS;
+      p.layoutMeta.bodyHeightUnits = this.metrics.pageBodyHeightUnits;
       const n = p.placements.length;
       const sumU = p.placements.reduce((s, x) => s + x.estimatedUnits, 0);
       p.layoutMeta.usedContentUnits = sumU + (n > 0 ? (n - 1) * GAP_AFTER_BLOCK : 0);
@@ -594,8 +612,9 @@ function paginateBookPass(
   sections: DocumentSection[],
   tocEntries: TocEntry[],
   tocConfig: TocConfig,
+  engineMetrics: LayoutEngineMetrics,
 ): RenderedPage[] {
-  const pag = new Paginator(snapshot.bookId);
+  const pag = new Paginator(snapshot.bookId, engineMetrics);
 
   let first = true;
   for (const section of sections) {
@@ -638,13 +657,14 @@ function tocEntriesSignature(entries: TocEntry[]): string {
 export function buildPaginatedLayout(snapshot: BookLayoutSnapshot): PaginatedBookResult {
   const sections = [...snapshot.sections].sort((a, b) => a.orderIndex - b.orderIndex);
   const tocConfig = resolveTocConfig(snapshot.layoutSettings.tocConfigJson);
+  const engineMetrics = computeLayoutEngineMetrics(snapshot.layoutSettings);
 
   let tocEntries: TocEntry[] = [];
   let pages: RenderedPage[] = [];
   let lastSignature = '';
 
   for (let pass = 0; pass < 4; pass++) {
-    pages = paginateBookPass(snapshot, sections, tocEntries, tocConfig);
+    pages = paginateBookPass(snapshot, sections, tocEntries, tocConfig, engineMetrics);
     const nextEntries = buildTocEntries({ sections, pages });
     const signature = tocEntriesSignature(nextEntries);
     if (signature === lastSignature) {
@@ -655,13 +675,15 @@ export function buildPaginatedLayout(snapshot: BookLayoutSnapshot): PaginatedBoo
     lastSignature = signature;
   }
 
-  pages = paginateBookPass(snapshot, sections, tocEntries, tocConfig);
+  pages = paginateBookPass(snapshot, sections, tocEntries, tocConfig, engineMetrics);
 
   return {
     bookId: snapshot.bookId,
     pages,
     tocEntries,
-    pageBodyHeightUnits: PAGE_BODY_HEIGHT_UNITS,
-    pageBodyWidthUnits:  PAGE_BODY_WIDTH_UNITS,
+    pageBodyHeightUnits: engineMetrics.pageBodyHeightUnits,
+    pageBodyWidthUnits:  engineMetrics.pageBodyWidthUnits,
+    layoutSettings:      snapshot.layoutSettings,
+    engineMetrics,
   };
 }

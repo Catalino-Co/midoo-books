@@ -25,13 +25,14 @@ export function ensureLayoutSettingsForBook(bookId: string): LayoutSettings {
       id, book_id,
       page_width, page_height, page_unit,
       margin_top, margin_bottom, margin_inside, margin_outside, facing_pages,
+      page_size_preset, bleed_mm, safe_area_inset_mm,
       body_font_family, heading_font_family, body_font_size, body_line_height,
       paragraph_spacing, first_line_indent,
       show_page_numbers, page_number_start, frontmatter_numbering_style, body_numbering_style,
       body_starts_at_section_id, hide_number_on_section_types,
       show_header, show_footer, header_config_json, footer_config_json, toc_config_json,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       bookId,
@@ -43,6 +44,9 @@ export function ensureLayoutSettingsForBook(bookId: string): LayoutSettings {
       DEFAULT_LAYOUT_SETTINGS.marginInside,
       DEFAULT_LAYOUT_SETTINGS.marginOutside,
       DEFAULT_LAYOUT_SETTINGS.facingPages ? 1 : 0,
+      DEFAULT_LAYOUT_SETTINGS.pageSizePreset,
+      DEFAULT_LAYOUT_SETTINGS.bleedMm,
+      DEFAULT_LAYOUT_SETTINGS.safeAreaInsetMm,
       DEFAULT_LAYOUT_SETTINGS.bodyFontFamily,
       DEFAULT_LAYOUT_SETTINGS.headingFontFamily,
       DEFAULT_LAYOUT_SETTINGS.bodyFontSize,
@@ -88,6 +92,9 @@ export function updateLayoutSettings(
   if (input.marginInside !== undefined) { fields.push('margin_inside = ?'); values.push(input.marginInside); }
   if (input.marginOutside !== undefined) { fields.push('margin_outside = ?'); values.push(input.marginOutside); }
   if (input.facingPages !== undefined) { fields.push('facing_pages = ?'); values.push(input.facingPages ? 1 : 0); }
+  if (input.pageSizePreset !== undefined) { fields.push('page_size_preset = ?'); values.push(input.pageSizePreset); }
+  if (input.bleedMm !== undefined) { fields.push('bleed_mm = ?'); values.push(input.bleedMm); }
+  if (input.safeAreaInsetMm !== undefined) { fields.push('safe_area_inset_mm = ?'); values.push(input.safeAreaInsetMm); }
   if (input.bodyFontFamily !== undefined) { fields.push('body_font_family = ?'); values.push(input.bodyFontFamily); }
   if (input.headingFontFamily !== undefined) { fields.push('heading_font_family = ?'); values.push(input.headingFontFamily); }
   if (input.bodyFontSize !== undefined) { fields.push('body_font_size = ?'); values.push(input.bodyFontSize); }

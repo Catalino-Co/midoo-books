@@ -4,6 +4,14 @@
    */
   import type { PaginatedBookResult, PlacedBlock, RenderedPage } from '$lib/core/editorial/page-layout-model';
   import type { Asset } from '$lib/core/domain/asset';
+  import { pageDimensionsMm } from '$lib/core/editorial/document-page-geometry';
+  import {
+    buildPreviewSheetCssVars,
+    buildPreviewContentBoxStyle,
+    buildPreviewSafeAreaStyle,
+    buildPreviewBodyPaddingStyle,
+    pageHeightOverWidthRatio,
+  } from '$lib/core/editorial/preview-page-style';
   import { assetDisplayUrl } from '$lib/services/assets.service';
   import {
     parseImageBlockContent,
@@ -33,6 +41,37 @@
   });
 
   let activePage = $derived(layout.pages[Math.min(activeIndex, Math.max(0, layout.pages.length - 1))] ?? null);
+
+  let layoutSettings = $derived(layout.layoutSettings);
+
+  let pagedRootCss = $derived.by(() => {
+    const vars = buildPreviewSheetCssVars(layoutSettings);
+    const ratio = pageHeightOverWidthRatio(layoutSettings);
+    const entries = Object.entries(vars).map(([k, v]) => `${k}:${v}`);
+    entries.push('--page-w:min(440px, 92vw)');
+    entries.push(`--page-h:calc(min(440px, 92vw) * ${ratio})`);
+    return entries.join(';');
+  });
+
+  let pageSheetExtraStyle = $derived.by(() => {
+    const bleed = Math.max(0, layoutSettings.bleedMm ?? 0);
+    if (bleed <= 0) return '';
+    const { widthMm } = pageDimensionsMm(layoutSettings);
+    const frac = bleed / Math.max(1e-6, widthMm);
+    return `box-shadow:0 0 0 max(1px,calc(var(--page-w) * ${frac})) rgba(255, 130, 70, 0.38);`;
+  });
+
+  let contentBoxStyle = $derived.by(() => {
+    if (!activePage) return '';
+    return buildPreviewContentBoxStyle(layoutSettings, activePage.side);
+  });
+
+  let safeGuideStyle = $derived.by(() => buildPreviewSafeAreaStyle(layoutSettings));
+
+  let bodyPaddingStyle = $derived.by(() => {
+    if (!activePage) return '';
+    return buildPreviewBodyPaddingStyle(layoutSettings, activePage.side);
+  });
 
   function assetUrlFor(assetId: string | null | undefined): string | null {
     if (!assetId) return null;
@@ -69,7 +108,7 @@
   }
 </script>
 
-<div class="paged-root">
+<div class="paged-root" style={pagedRootCss}>
   {#if layout.pages.length === 0}
     <p class="paged-empty">No hay páginas que mostrar.</p>
   {:else}
@@ -125,7 +164,11 @@
           class:page-sheet--right={activePage.side === 'right'}
           class:page-sheet--blank={activePage.kind === 'editorial_blank'}
           class:page-sheet--cover={pageUsesFullPageImage(activePage)}
+          style={`${pageSheetExtraStyle}`}
         >
+          <div class="page-content-box" style={contentBoxStyle}>
+          <div class="page-safe-guide" style={safeGuideStyle} aria-hidden="true"></div>
+
           {#if activePage.editorial.headerText && !pageUsesFullPageImage(activePage)}
             <div class="page-header">
               <span>{activePage.editorial.headerText}</span>
@@ -143,7 +186,11 @@
             {/if}
           </header>
 
-          <div class="page-body" class:page-body--cover={pageUsesFullPageImage(activePage)}>
+          <div
+            class="page-body"
+            class:page-body--cover={pageUsesFullPageImage(activePage)}
+            style={pageUsesFullPageImage(activePage) ? '' : bodyPaddingStyle}
+          >
             {#if activePage.kind === 'editorial_blank'}
               <div class="blank-mark" aria-hidden="true"></div>
               <p class="blank-label">Página en blanco editorial</p>
@@ -253,6 +300,7 @@
               </ul>
             </details>
           {/if}
+          </div>
         </article>
       {/if}
     </div>
@@ -261,8 +309,6 @@
 
 <style>
   .paged-root {
-    --page-w: min(440px, 94vw);
-    --page-h: calc(var(--page-w) * 1.414);
     --preview-toolbar-h: 30px;
     --preview-toolbar-gap: 10px;
     display: flex;
@@ -391,15 +437,34 @@
     min-height: var(--page-h);
     max-height: var(--page-h);
     margin: 0 auto;
-    background: #fafaf8;
+    background: #d8d8d4;
     color: #1a1a22;
     border-radius: 3px;
     box-shadow:
       0 2px 4px rgba(0, 0, 0, 0.12),
       0 12px 28px rgba(0, 0, 0, 0.18);
+    display: block;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .page-content-box {
+    position: absolute;
+    background: #fafaf8;
+    border-radius: 1px;
     display: flex;
     flex-direction: column;
-    position: relative;
+    overflow: hidden;
+    z-index: 1;
+  }
+
+  .page-safe-guide {
+    position: absolute;
+    z-index: 3;
+    pointer-events: none;
+    border: 1px dashed rgba(80, 140, 220, 0.45);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+    border-radius: 1px;
   }
   .page-sheet--right {
     box-shadow:
@@ -456,10 +521,10 @@
 
   .page-body {
     flex: 1;
-    padding: 14px 22px 18px;
     font-family: 'Georgia', 'Times New Roman', serif;
     font-size: 13px;
     line-height: 1.55;
+    min-height: 0;
   }
   .page-body--cover {
     padding: 0;
@@ -492,7 +557,8 @@
     margin-bottom: 0.85em;
   }
   .flow-block--CHAPTER_OPENING {
-    margin: -14px -22px 12px;
+    margin: calc(-1 * var(--flow-pull-y, 2.6%)) calc(-1 * var(--flow-pull-x, 5.6%)) 12px
+      calc(-1 * var(--flow-pull-x, 5.6%));
   }
 
   .flow-h1 {

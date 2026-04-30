@@ -80,12 +80,23 @@ export interface BookLayoutSnapshot {
   blocksBySectionId: Record<string, DocumentBlock[]>;
 }
 
+/** Métricas internas del motor de paginación (PARTE 13). */
+export interface LayoutEngineMetrics {
+  pageBodyHeightUnits: number;
+  pageBodyWidthUnits: number;
+  charsPerLine: number;
+}
+
 export interface PaginatedBookResult {
   bookId: string;
   pages: RenderedPage[];
   tocEntries: TocEntry[];
-  /** Unidades de altura del cuerpo útil (constante del motor v1). */
+  /** Unidades de altura del cuerpo útil (derivadas del trim size, PARTE 13). */
   pageBodyHeightUnits: number;
-  /** Ancho lógico (constante v1). */
+  /** Ancho lógico del cuerpo útil (derivado del trim size). */
   pageBodyWidthUnits: number;
+  /** Ajustes persistidos usados para esta pasada (preview + motor). */
+  layoutSettings: LayoutSettings;
+  /** Métricas internas del motor (chars por línea, etc.). */
+  engineMetrics: LayoutEngineMetrics;
 }

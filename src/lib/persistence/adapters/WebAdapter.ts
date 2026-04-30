@@ -37,6 +37,7 @@ import {
 } from '$lib/core/domain/index';
 import { asSectionId } from '$lib/core/domain/section';
 import { asBlockId } from '$lib/core/domain/block';
+import { detectPageSizePreset } from '$lib/core/editorial/page-size-presets';
 
 const PREFIX = 'midoo:';
 const BOOKS_KEY = `${PREFIX}books`;
@@ -64,6 +65,18 @@ function readLayouts(): LayoutSettings[] {
 
 function writeLayouts(layouts: LayoutSettings[]): void {
   localStorage.setItem(LAYOUT_KEY, JSON.stringify(layouts));
+}
+
+function normalizeWebLayoutSettings(layout: LayoutSettings): LayoutSettings {
+  return {
+    ...DEFAULT_LAYOUT_SETTINGS,
+    ...layout,
+    pageSizePreset:
+      layout.pageSizePreset
+      ?? detectPageSizePreset(layout.pageWidth, layout.pageHeight, layout.pageUnit),
+    bleedMm: layout.bleedMm ?? 0,
+    safeAreaInsetMm: layout.safeAreaInsetMm ?? 0,
+  };
 }
 
 function newId(): string {
@@ -176,15 +189,15 @@ export class WebAdapter implements IPlatformAdapter {
 
   getLayoutSettingsByBookId(bookId: string): Promise<LayoutSettings> {
     const existing = readLayouts().find(layout => layout.bookId === bookId);
-    if (existing) return Promise.resolve(existing);
+    if (existing) return Promise.resolve(normalizeWebLayoutSettings(existing));
     const ts = now();
-    const created: LayoutSettings = {
+    const created: LayoutSettings = normalizeWebLayoutSettings({
       id:        newId() as LayoutSettings['id'],
       bookId,
       ...DEFAULT_LAYOUT_SETTINGS,
       createdAt: ts,
       updatedAt: ts,
-    };
+    });
     writeLayouts([...readLayouts(), created]);
     return Promise.resolve(created);
   }
@@ -196,11 +209,11 @@ export class WebAdapter implements IPlatformAdapter {
     const layouts = readLayouts();
     const existing = await this.getLayoutSettingsByBookId(bookId);
     const idx = layouts.findIndex(layout => layout.bookId === bookId);
-    const updated: LayoutSettings = {
+    const updated: LayoutSettings = normalizeWebLayoutSettings({
       ...existing,
       ...Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)),
       updatedAt: now(),
-    };
+    });
     if (idx === -1) layouts.push(updated);
     else layouts[idx] = updated;
     writeLayouts(layouts);
