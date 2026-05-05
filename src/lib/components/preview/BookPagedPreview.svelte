@@ -257,7 +257,7 @@
                       {:else}
                         <div class="img-ph">Sin recurso</div>
                       {/if}
-                      {#if im.caption.trim()}
+                      {#if im.caption.trim() && !isFullPageImage(activePage, pl)}
                         <figcaption>{im.caption}</figcaption>
                       {/if}
                     </figure>
@@ -659,9 +659,8 @@
     height: 100%;
     max-width: none;
     max-height: none;
-    object-fit: contain;
+    object-fit: cover;
     margin: 0;
-    background: #fafaf8;
   }
   .img-ph {
     min-height: 100px;
