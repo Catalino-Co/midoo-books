@@ -143,20 +143,6 @@
     return page.placements.some(pl => isFullPageImage(page, pl));
   }
 
-  /**
-   * El cuerpo es flex y el texto se alinea arriba: en páginas con pocos bloques (p. ej. inicio de sección)
-   * queda mucho blanco abajo mientras que las páginas llenas “tocan” el pie. Un spacer flexible arriba
-   * del flujo ancla el bloque al pie y unifica el aspecto.
-   */
-  let anchorFlowToFooter = $derived.by(() => {
-    if (!activePage || activePage.kind === 'editorial_blank') return false;
-    if (pageUsesFullPageImage(activePage)) return false;
-    const pls = activePage.placements;
-    if (pls.length === 1 && pls[0]?.syntheticType === 'TOC') return false;
-    if (pls.length > 0 && pls.every(p => p.fullPageComposition === true)) return false;
-    return true;
-  });
-
   function firstEditableBlockId(page: RenderedPage): string | null {
     return page.placements.find(pl => pl.block?.id)?.block?.id ?? null;
   }
@@ -260,10 +246,6 @@
               <p class="blank-label">Página en blanco editorial</p>
               <p class="blank-hint">Forzada por reglas de inicio en recto u otras reglas v1.</p>
             {:else}
-              {#if anchorFlowToFooter}
-                <div class="page-flow-spacer" aria-hidden="true"></div>
-              {/if}
-              <div class="page-flow">
               {#each activePage.placements as pl, pi (`${pl.block?.id ?? pl.syntheticType ?? 'synthetic'}-${pi}-${pl.textOverride ?? ''}`)}
                 <div
                   class="flow-block flow-block--{pl.block?.blockType ?? pl.syntheticType ?? 'SYNTHETIC'}"
@@ -347,7 +329,6 @@
                   {/if}
                 </div>
               {/each}
-              </div>
             {/if}
           </div>
 
@@ -593,21 +574,10 @@
 
   .page-body {
     flex: 1;
-    display: flex;
-    flex-direction: column;
     font-family: 'Georgia', 'Times New Roman', serif;
     font-size: 13px;
     line-height: 1.55;
     min-height: 0;
-  }
-  .page-flow-spacer {
-    flex: 1 1 0;
-    min-height: 0;
-  }
-  .page-flow {
-    flex: 0 0 auto;
-    flex-shrink: 0;
-    min-width: 0;
   }
   .page-body--cover {
     padding: 0;
