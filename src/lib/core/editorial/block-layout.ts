@@ -117,6 +117,21 @@ export function resolveBlockLayout(block: DocumentBlock): BlockLayoutStyle {
 }
 
 /**
+ * Devuelve solo las propiedades de layout que realmente modifican el comportamiento
+ * base del tipo de bloque. Sirve para combinar overlays locales sobre estilos globales
+ * sin arrastrar los defaults genéricos del blockType cuando no hacen falta.
+ */
+export function resolveBlockLayoutOverrides(block: DocumentBlock): Partial<BlockLayoutStyle> {
+  const neutral = defaultBlockLayout(block.blockType, 'default');
+  const effective = resolveBlockLayout(block);
+  return {
+    textAlign: effective.textAlign !== neutral.textAlign ? effective.textAlign : undefined,
+    widthMode: effective.widthMode !== neutral.widthMode ? effective.widthMode : undefined,
+    emphasis: effective.emphasis !== neutral.emphasis ? effective.emphasis : undefined,
+  };
+}
+
+/**
  * Serializa layout en metadata preservando otras claves del objeto JSON.
  */
 export function mergeLayoutIntoMetadata(

@@ -12,12 +12,18 @@
     buildPreviewBodyPaddingStyle,
     pageHeightOverWidthRatio,
   } from '$lib/core/editorial/preview-page-style';
+  import {
+    resolveBookStyles,
+    resolveEffectiveBookStyleForBlock,
+    resolveEffectiveBookStyleInfoForBlock,
+    buildBookStyleCss,
+    type BookStyleDefinition,
+  } from '$lib/core/editorial/book-styles';
   import { assetDisplayUrl } from '$lib/services/assets.service';
   import {
     parseImageBlockContent,
     parseChapterOpeningContent,
     chapterOpeningPreviewRootClassNames,
-    resolveBlockLayout,
   } from '$lib/services/content.service';
   import { sectionTypeLabel } from '$lib/services/content.service';
 
@@ -43,6 +49,7 @@
   let activePage = $derived(layout.pages[Math.min(activeIndex, Math.max(0, layout.pages.length - 1))] ?? null);
 
   let layoutSettings = $derived(layout.layoutSettings);
+  let bookStyles = $derived(resolveBookStyles(layoutSettings));
 
   let pagedRootCss = $derived.by(() => {
     const vars = buildPreviewSheetCssVars(layoutSettings);
@@ -81,6 +88,47 @@
 
   function bodyText(pl: PlacedBlock): string {
     return pl.textOverride ?? pl.block?.contentText ?? '';
+  }
+
+  function textStyleForPlacement(page: RenderedPage, pl: PlacedBlock): string {
+    if (!pl.block) return '';
+    const resolved = resolveEffectiveBookStyleForBlock(
+      layoutSettings,
+      page.primarySectionType ? { sectionType: page.primarySectionType } : null,
+      pl.block,
+    );
+    if (!resolved) return '';
+    const style = { ...resolved };
+    if (pl.debugMeta?.continuedFromPreviousPage) {
+      style.marginTop = 0;
+    }
+    if (pl.debugMeta?.continuesOnNextPage) {
+      style.marginBottom = 0;
+    }
+    return buildBookStyleCss(style);
+  }
+
+  function textStyleDebugForPlacement(page: RenderedPage, pl: PlacedBlock): string | null {
+    if (!pl.block) return null;
+    const info = resolveEffectiveBookStyleInfoForBlock(
+      layoutSettings,
+      page.primarySectionType ? { sectionType: page.primarySectionType } : null,
+      pl.block,
+    );
+    if (!info) return null;
+    return [
+      `rol=${info.role}`,
+      `base=${info.baseStyle.fontSize}/${info.baseStyle.lineHeight}/${info.baseStyle.textAlign}`,
+      `override=${info.blockLayout.textAlign ?? '-'}|${info.blockLayout.widthMode ?? '-'}|${info.blockLayout.emphasis ?? '-'}`,
+      `final=${info.finalStyle.fontSize}/${info.finalStyle.lineHeight}/${info.finalStyle.textAlign}`,
+    ].join(' · ');
+  }
+
+  function chapterOpeningTextStyle(
+    style: BookStyleDefinition,
+    textAlign: 'left' | 'center' | 'right',
+  ): string {
+    return buildBookStyleCss({ ...style, textAlign }, { includeMargins: false });
   }
 
   function isFullPageImage(page: RenderedPage, pl: PlacedBlock): boolean {
@@ -197,17 +245,20 @@
               <p class="blank-hint">Forzada por reglas de inicio en recto u otras reglas v1.</p>
             {:else}
               {#each activePage.placements as pl, pi (`${pl.block?.id ?? pl.syntheticType ?? 'synthetic'}-${pi}-${pl.textOverride ?? ''}`)}
-                {@const L = pl.block ? resolveBlockLayout(pl.block) : null}
-                <div class="flow-block flow-block--{pl.block?.blockType ?? pl.syntheticType ?? 'SYNTHETIC'}">
+                <div
+                  class="flow-block flow-block--{pl.block?.blockType ?? pl.syntheticType ?? 'SYNTHETIC'}"
+                  data-style-debug={textStyleDebugForPlacement(activePage, pl) ?? undefined}
+                  title={textStyleDebugForPlacement(activePage, pl) ?? undefined}
+                >
                   {#if pl.syntheticType === 'TOC'}
                     <section class="toc-render">
                       {#if pl.tocConfig?.showTitle}
-                        <h2 class="toc-render__title">{pl.tocConfig.titleText}</h2>
+                        <h2 class="toc-render__title" style={buildBookStyleCss(bookStyles.HEADING_1)}>{pl.tocConfig.titleText}</h2>
                       {/if}
                       {#if pl.tocEntries && pl.tocEntries.length > 0}
                         <div class="toc-render__list">
                           {#each pl.tocEntries as entry (`${entry.targetSectionId}-${entry.orderIndex}`)}
-                            <div class="toc-render__row">
+                            <div class="toc-render__row" style={buildBookStyleCss(bookStyles.TOC_ENTRY, { includeMargins: false, includeMaxWidth: false })}>
                               <span class="toc-render__label">{entry.label}</span>
                               {#if pl.tocConfig?.showDotLeaders}
                                 <span class="toc-render__dots" aria-hidden="true"></span>
@@ -235,10 +286,10 @@
                       {/if}
                       <div class="co-render__text">
                         {#if co.chapterLabel.trim()}
-                          <span class="co-render__lab">{co.chapterLabel}</span>
+                          <span class="co-render__lab" style={chapterOpeningTextStyle(bookStyles.CHAPTER_OPENING_LABEL, co.textAlign)}>{co.chapterLabel}</span>
                         {/if}
                         {#if co.title.trim()}
-                          <span class="co-render__tit">{co.title}</span>
+                          <span class="co-render__tit" style={chapterOpeningTextStyle(bookStyles.CHAPTER_OPENING_TITLE, co.textAlign)}>{co.title}</span>
                         {/if}
                       </div>
                     </div>
@@ -262,17 +313,17 @@
                       {/if}
                     </figure>
                   {:else if pl.block?.blockType === 'HEADING_1'}
-                    <h1 class="flow-h1" style:text-align={L?.textAlign}>{bodyText(pl)}</h1>
+                    <h1 class="flow-h1" style={textStyleForPlacement(activePage, pl)}>{bodyText(pl)}</h1>
                   {:else if pl.block?.blockType === 'HEADING_2'}
-                    <h2 class="flow-h2" style:text-align={L?.textAlign}>{bodyText(pl)}</h2>
+                    <h2 class="flow-h2" style={textStyleForPlacement(activePage, pl)}>{bodyText(pl)}</h2>
                   {:else if pl.block?.blockType === 'QUOTE'}
-                    <blockquote class="flow-quote" style:text-align={L?.textAlign}>{bodyText(pl)}</blockquote>
+                    <blockquote class="flow-quote" style={textStyleForPlacement(activePage, pl)}>{bodyText(pl)}</blockquote>
                   {:else if pl.block?.blockType === 'SEPARATOR'}
                     <hr class="flow-sep" />
                   {:else if pl.block?.blockType === 'CENTERED_PHRASE'}
-                    <p class="flow-center" style:text-align={L?.textAlign}>{bodyText(pl)}</p>
+                    <p class="flow-center" style={textStyleForPlacement(activePage, pl)}>{bodyText(pl)}</p>
                   {:else}
-                    <p class="flow-p" style:text-align={L?.textAlign}>{bodyText(pl)}</p>
+                    <p class="flow-p" style={textStyleForPlacement(activePage, pl)}>{bodyText(pl)}</p>
                   {/if}
                 </div>
               {/each}
@@ -554,7 +605,7 @@
   }
 
   .flow-block {
-    margin-bottom: 0.85em;
+    margin: 0;
   }
   .flow-block--CHAPTER_OPENING {
     margin: calc(-1 * var(--flow-pull-y, 2.6%)) calc(-1 * var(--flow-pull-x, 5.6%)) 12px

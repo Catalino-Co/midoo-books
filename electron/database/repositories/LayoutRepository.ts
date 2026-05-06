@@ -30,9 +30,9 @@ export function ensureLayoutSettingsForBook(bookId: string): LayoutSettings {
       paragraph_spacing, first_line_indent,
       show_page_numbers, page_number_start, frontmatter_numbering_style, body_numbering_style,
       body_starts_at_section_id, hide_number_on_section_types,
-      show_header, show_footer, header_config_json, footer_config_json, toc_config_json,
+      show_header, show_footer, header_config_json, footer_config_json, toc_config_json, styles_json,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       bookId,
@@ -64,6 +64,7 @@ export function ensureLayoutSettingsForBook(bookId: string): LayoutSettings {
       DEFAULT_LAYOUT_SETTINGS.headerConfigJson,
       DEFAULT_LAYOUT_SETTINGS.footerConfigJson,
       DEFAULT_LAYOUT_SETTINGS.tocConfigJson,
+      DEFAULT_LAYOUT_SETTINGS.stylesJson,
       ts,
       ts,
     ],
@@ -124,6 +125,7 @@ export function updateLayoutSettings(
   if ('headerConfigJson' in input) { fields.push('header_config_json = ?'); values.push(input.headerConfigJson ?? null); }
   if ('footerConfigJson' in input) { fields.push('footer_config_json = ?'); values.push(input.footerConfigJson ?? null); }
   if ('tocConfigJson' in input) { fields.push('toc_config_json = ?'); values.push(input.tocConfigJson ?? null); }
+  if ('stylesJson' in input) { fields.push('styles_json = ?'); values.push(input.stylesJson ?? null); }
 
   if (fields.length === 0) return existing;
 

@@ -7,6 +7,7 @@ import type { LayoutSettings } from '$lib/core/domain/layout';
 import { DEFAULT_LAYOUT_SETTINGS } from '$lib/core/domain/layout';
 import { getPageContentBoxMm } from './document-page-geometry';
 import type { LayoutEngineMetrics, PageSpreadSide } from './page-layout-model';
+import { resolveBookStyles } from './book-styles';
 
 function referenceLayoutSettings(): LayoutSettings {
   return {
@@ -25,6 +26,12 @@ const REF_CONTENT_BOX = getPageContentBoxMm(referenceLayoutSettings(), REF_SIDE)
 const REF_UNITS_HEIGHT = 540;
 const REF_UNITS_WIDTH = 396;
 const REF_CHARS_PER_LINE = 58;
+const PREVIEW_FLOW_PAD_TOP_MM = 14;
+const PREVIEW_FLOW_PAD_BOTTOM_MM = 18;
+const PREVIEW_FLOW_PAD_X_MM = 22;
+const PREVIEW_RAIL_MM = 14;
+const PREVIEW_FOOTER_MM = 13;
+const PREVIEW_HEADER_MM = 6;
 
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
@@ -38,14 +45,28 @@ export function getEngineContentBoxMm(settings: LayoutSettings): {
   contentHeightMm: number;
 } {
   const a = getPageContentBoxMm(settings, 'right');
+  const usableWidthMm = Math.max(
+    20,
+    a.contentWidthMm - (PREVIEW_FLOW_PAD_X_MM * 2),
+  );
+  const usableHeightMm = Math.max(
+    28,
+    a.contentHeightMm
+      - PREVIEW_FLOW_PAD_TOP_MM
+      - PREVIEW_FLOW_PAD_BOTTOM_MM
+      - PREVIEW_RAIL_MM
+      - PREVIEW_FOOTER_MM
+      - (settings.showHeader ? PREVIEW_HEADER_MM : 0),
+  );
   return {
-    contentWidthMm: a.contentWidthMm,
-    contentHeightMm: a.contentHeightMm,
+    contentWidthMm: usableWidthMm,
+    contentHeightMm: usableHeightMm,
   };
 }
 
 export function computeLayoutEngineMetrics(settings: LayoutSettings): LayoutEngineMetrics {
   const { contentWidthMm, contentHeightMm } = getEngineContentBoxMm(settings);
+  const paragraphStyle = resolveBookStyles(settings).PARAGRAPH;
 
   const scaleH = contentHeightMm / REF_CONTENT_BOX.contentHeightMm;
   const scaleW = contentWidthMm / REF_CONTENT_BOX.contentWidthMm;
@@ -54,7 +75,9 @@ export function computeLayoutEngineMetrics(settings: LayoutSettings): LayoutEngi
   const pageBodyWidthUnits = Math.round(clamp(REF_UNITS_WIDTH * scaleW, 240, 980));
 
   const chars = Math.round(
-    REF_CHARS_PER_LINE * (REF_CONTENT_BOX.contentWidthMm / Math.max(20, contentWidthMm)),
+    REF_CHARS_PER_LINE
+      * (REF_CONTENT_BOX.contentWidthMm / Math.max(20, contentWidthMm))
+      * (DEFAULT_LAYOUT_SETTINGS.bodyFontSize / Math.max(8, paragraphStyle.fontSize)),
   );
 
   return {

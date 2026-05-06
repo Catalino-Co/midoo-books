@@ -19,6 +19,7 @@
  *   v7 — assets: caption + tipo image (PARTE 8)
  *   v8 — Numeración editorial en layout_settings (PARTE 10)
  *   v9 — Formato físico: preset, bleed, safe area (PARTE 13)
+ *   v10 — styles_json en layout_settings (módulo Estilos)
  */
 
 import type { Database } from 'sql.js';
@@ -708,6 +709,25 @@ const migrations: Migration[] = [
       `);
 
       console.log('[DB] v9: layout_settings — preset de página, bleed y safe area.');
+    },
+  },
+
+  // ─── v10: Estilos globales del libro (módulo Estilos) ───────────────────
+  {
+    version: 10,
+    name: 'book_styles_layout_settings',
+    up(db) {
+      db.run(`
+        ALTER TABLE layout_settings ADD COLUMN styles_json TEXT
+      `);
+
+      db.run(`
+        INSERT OR REPLACE INTO app_settings (key, value) VALUES
+          ('appVersion',    '0.10.0'),
+          ('schemaVersion', '10')
+      `);
+
+      console.log('[DB] v10: layout_settings — styles_json para estilos globales.');
     },
   },
 

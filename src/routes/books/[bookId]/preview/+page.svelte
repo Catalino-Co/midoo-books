@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import BookPagedPreview from '$lib/components/preview/BookPagedPreview.svelte';
-  import { loadBookLayoutSnapshot, computePaginatedPreview } from '$lib/services/preview-layout.service';
+  import { loadBookLayoutSnapshot, computePaginatedPreviewForBrowser } from '$lib/services/preview-layout.service';
   import { listAssets } from '$lib/services/assets.service';
   import type { PaginatedBookResult } from '$lib/core/editorial/page-layout-model';
   import type { Asset } from '$lib/core/domain/asset';
@@ -25,7 +25,7 @@
     try {
       const snap = await loadBookLayoutSnapshot(bookId);
       assets = await listAssets(bookId);
-      layout = computePaginatedPreview(snap);
+      layout = await computePaginatedPreviewForBrowser(snap);
     } catch (e) {
       loadError = e instanceof Error ? e.message : String(e);
     } finally {

@@ -64,6 +64,7 @@ export function rowToLayoutSettings(row: Record<string, SqlValue>): LayoutSettin
     headerConfigJson:         row.header_config_json != null ? String(row.header_config_json) : null,
     footerConfigJson:         row.footer_config_json != null ? String(row.footer_config_json) : null,
     tocConfigJson:            row.toc_config_json != null ? String(row.toc_config_json) : null,
+    stylesJson:               row.styles_json != null ? String(row.styles_json) : null,
     createdAt:                String(row.created_at ?? ''),
     updatedAt:                String(row.updated_at ?? ''),
   };

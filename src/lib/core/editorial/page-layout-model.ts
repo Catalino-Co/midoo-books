@@ -43,6 +43,10 @@ export interface PlacedBlock {
     fragmentLineStart?: number;
     fragmentLineCount?: number;
     keepWithNextApplied?: boolean;
+    keepTogetherApplied?: boolean;
+    widowOrphanAdjusted?: boolean;
+    movedToNextPage?: boolean;
+    nonFragmentable?: boolean;
   };
 }
 

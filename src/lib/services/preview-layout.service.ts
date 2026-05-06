@@ -9,6 +9,7 @@ import type { DocumentBlock } from '$lib/core/domain/block';
 import type { BookLayoutSnapshot } from '$lib/core/editorial/page-layout-model';
 import { buildPaginatedLayout } from '$lib/core/editorial/page-layout-engine';
 import type { PaginatedBookResult } from '$lib/core/editorial/page-layout-model';
+import { BrowserPreviewTextMeasurer } from '$lib/core/editorial/browser-preview-text-measurer';
 
 export async function loadBookLayoutSnapshot(bookId: string): Promise<BookLayoutSnapshot> {
   const book = await getBook(bookId);
@@ -32,6 +33,23 @@ export async function loadBookLayoutSnapshot(bookId: string): Promise<BookLayout
 
 export function computePaginatedPreview(snapshot: BookLayoutSnapshot): PaginatedBookResult {
   return buildPaginatedLayout(snapshot);
+}
+
+export async function computePaginatedPreviewForBrowser(snapshot: BookLayoutSnapshot): Promise<PaginatedBookResult> {
+  if (typeof document === 'undefined') {
+    return buildPaginatedLayout(snapshot);
+  }
+
+  const fallback = buildPaginatedLayout(snapshot);
+  const measurer = new BrowserPreviewTextMeasurer(fallback.engineMetrics);
+  try {
+    return buildPaginatedLayout(snapshot, {
+      engineMetrics: fallback.engineMetrics,
+      textMeasurement: measurer,
+    });
+  } finally {
+    measurer.dispose();
+  }
 }
 
 export interface PreviewLocationTarget {

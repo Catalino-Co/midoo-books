@@ -72,6 +72,7 @@ export interface LayoutSettings {
 
   // ── TOC ───────────────────────────────────────────────────────────────────
   tocConfigJson:            string | null;      // JSON de configuración del TOC
+  stylesJson:               string | null;      // JSON de estilos editoriales globales del libro
 
   createdAt:                string;
   updatedAt:                string;
@@ -125,4 +126,5 @@ export const DEFAULT_LAYOUT_SETTINGS: Omit<LayoutSettings, 'id' | 'bookId' | 'cr
   headerConfigJson:         null,
   footerConfigJson:         null,
   tocConfigJson:            null,
+  stylesJson:               null,
 };

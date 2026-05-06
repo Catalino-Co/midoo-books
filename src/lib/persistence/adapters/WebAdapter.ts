@@ -76,6 +76,7 @@ function normalizeWebLayoutSettings(layout: LayoutSettings): LayoutSettings {
       ?? detectPageSizePreset(layout.pageWidth, layout.pageHeight, layout.pageUnit),
     bleedMm: layout.bleedMm ?? 0,
     safeAreaInsetMm: layout.safeAreaInsetMm ?? 0,
+    stylesJson: layout.stylesJson ?? null,
   };
 }
 

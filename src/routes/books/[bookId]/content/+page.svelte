@@ -74,6 +74,13 @@
     pickAndImportAssets,
     assetDisplayUrl,
   } from '$lib/services/assets.service';
+  import { getLayoutSettings } from '$lib/services/layout.service';
+  import {
+    bookStyleRoleLabel,
+    resolveEffectiveBookStyleInfoForBlock,
+    buildResolvedBookStyleDebug,
+    type ResolvedBookStyleInfo,
+  } from '$lib/services/styles.service';
   import {
     loadBookLayoutSnapshot,
     computePaginatedPreview,
@@ -85,6 +92,7 @@
     DocumentSection, SectionType,
     DocumentBlock,   BlockType, BlockStyleVariant,
     Asset,
+    LayoutSettings,
   } from '$lib/core/domain/index';
   import { DEFAULT_SECTION_TYPE, DEFAULT_BLOCK_TYPE } from '$lib/core/domain/index';
 
@@ -152,6 +160,12 @@
   let selectedSectionRules = $derived(selectedSection ? resolveSectionEditorialRules(selectedSection) : null);
   let newSectionPreset = $derived(getSectionEditorialPreset(newSectionType));
   let inspectorSectionPreset = $derived(getSectionEditorialPreset(insp_sType));
+  let bookLayoutSettings     = $state<LayoutSettings | null>(null);
+  let selectedBlockStyleInfo = $derived<ResolvedBookStyleInfo | null>(
+    selectedBlock && selectedSection && bookLayoutSettings
+      ? resolveEffectiveBookStyleInfoForBlock(bookLayoutSettings, selectedSection, selectedBlock)
+      : null
+  );
 
   // Inspector: ¿qué mostrar?
   let inspectorMode = $derived<'section' | 'block' | 'none'>(
@@ -205,10 +219,15 @@
   onMount(async () => {
     await loadSections();
     await loadBookAssets();
+    await loadBookStylesContext();
   });
 
   $effect(() => {
     if (bookId) void loadBookAssets();
+  });
+
+  $effect(() => {
+    if (bookId) void loadBookStylesContext();
   });
 
   async function loadBookAssets() {
@@ -216,6 +235,14 @@
       bookAssets = await listAssets(bookId);
     } catch {
       bookAssets = [];
+    }
+  }
+
+  async function loadBookStylesContext() {
+    try {
+      bookLayoutSettings = await getLayoutSettings(bookId);
+    } catch {
+      bookLayoutSettings = null;
     }
   }
 
@@ -1621,6 +1648,39 @@
               {/each}
             </select>
           </div>
+
+          {#if selectedBlockStyleInfo}
+            <div class="insp-preset-card insp-preset-card--style-role">
+              <div class="insp-preset-title">Rol editorial efectivo en preview</div>
+              <div class="insp-preset-grid">
+                <span class="insp-preset-chip insp-preset-chip--accent">
+                  Rol: {bookStyleRoleLabel(selectedBlockStyleInfo.role)}
+                </span>
+                <span class="insp-preset-chip">
+                  Base: {selectedBlockStyleInfo.baseStyle.fontSize} pt / {selectedBlockStyleInfo.baseStyle.lineHeight}
+                </span>
+                <span class="insp-preset-chip">
+                  Final: {selectedBlockStyleInfo.finalStyle.fontSize} pt / {selectedBlockStyleInfo.finalStyle.lineHeight}
+                </span>
+                <span class="insp-preset-chip">
+                  Alineación: {selectedBlockStyleInfo.finalStyle.textAlign}
+                </span>
+                <span class="insp-preset-chip">
+                  Ancho: {selectedBlockStyleInfo.finalStyle.maxWidth ?? 'auto'}
+                </span>
+                <span class="insp-preset-chip">
+                  Peso: {selectedBlockStyleInfo.finalStyle.fontWeight}
+                </span>
+              </div>
+              <p class="insp-preset-note">
+                Este bloque se renderiza con el estilo global <strong>{bookStyleRoleLabel(selectedBlockStyleInfo.role)}</strong>,
+                combinado con los overrides locales que existan.
+              </p>
+              <p class="insp-debug-note" title={buildResolvedBookStyleDebug(selectedBlockStyleInfo)}>
+                {buildResolvedBookStyleDebug(selectedBlockStyleInfo)}
+              </p>
+            </div>
+          {/if}
 
           {#if inspSurface === 'short'}
             <div class="insp-field">
@@ -3118,11 +3178,25 @@
     background: rgba(122,184,232,0.08);
   }
 
+  .insp-preset-chip--accent {
+    border-color: rgba(122,184,232,0.45);
+    color: #d6ecff;
+    background: rgba(122,184,232,0.12);
+  }
+
   .insp-preset-note {
     margin: 0;
     font-size: 10px;
     line-height: 1.45;
     color: rgba(255,255,255,0.3);
+  }
+
+  .insp-debug-note {
+    margin: 0;
+    font-size: 10px;
+    line-height: 1.45;
+    color: rgba(255,255,255,0.24);
+    word-break: break-word;
   }
 
   .insp-section-label {
