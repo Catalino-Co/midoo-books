@@ -189,6 +189,24 @@ export async function moveSectionInList(
   return reordered;
 }
 
+export async function reorderSectionToIndex(
+  sections: DocumentSection[],
+  sectionId: string,
+  toIndex: number,
+): Promise<DocumentSection[]> {
+  const list = [...sections].sort((a, b) => a.orderIndex - b.orderIndex);
+  const from = list.findIndex(s => s.id === sectionId);
+  if (from === -1 || from === toIndex) return list;
+  const [item] = list.splice(from, 1);
+  list.splice(toIndex, 0, item);
+  const reordered = list.map((s, i) => ({ ...s, orderIndex: i }));
+  const bookId = reordered[0]?.bookId;
+  if (bookId) {
+    await getPlatformAdapter().reorderSections(bookId, reordered.map(s => s.id));
+  }
+  return reordered;
+}
+
 // ─── Bloques ──────────────────────────────────────────────────────────────────
 
 export async function listBlocks(sectionId: string): Promise<DocumentBlock[]> {
@@ -360,6 +378,24 @@ export async function moveBlockInList(
 
   const reordered  = list.map((b, i) => ({ ...b, orderIndex: i }));
   const sectionId  = reordered[0]?.sectionId;
+  if (sectionId) {
+    await getPlatformAdapter().reorderBlocks(sectionId, reordered.map(b => b.id));
+  }
+  return reordered;
+}
+
+export async function reorderBlockToIndex(
+  blocks: DocumentBlock[],
+  blockId: string,
+  toIndex: number,
+): Promise<DocumentBlock[]> {
+  const list = [...blocks].sort((a, b) => a.orderIndex - b.orderIndex);
+  const from = list.findIndex(b => b.id === blockId);
+  if (from === -1 || from === toIndex) return list;
+  const [item] = list.splice(from, 1);
+  list.splice(toIndex, 0, item);
+  const reordered = list.map((b, i) => ({ ...b, orderIndex: i }));
+  const sectionId = reordered[0]?.sectionId;
   if (sectionId) {
     await getPlatformAdapter().reorderBlocks(sectionId, reordered.map(b => b.id));
   }

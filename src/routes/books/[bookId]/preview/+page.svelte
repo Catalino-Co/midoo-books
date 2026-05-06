@@ -2,7 +2,7 @@
   import { dev } from '$app/environment';
   import { page } from '$app/stores';
   import BookPagedPreview from '$lib/components/preview/BookPagedPreview.svelte';
-  import { loadBookLayoutSnapshot, computePaginatedPreviewForBrowser } from '$lib/services/preview-layout.service';
+  import { loadBookLayoutSnapshot, computePaginatedPreviewForBrowser, findPreviewLocationForSelection } from '$lib/services/preview-layout.service';
   import { listAssets } from '$lib/services/assets.service';
   import type { PaginatedBookResult } from '$lib/core/editorial/page-layout-model';
   import type { Asset } from '$lib/core/domain/asset';
@@ -13,16 +13,19 @@
     const value = raw ? Number.parseInt(raw, 10) : NaN;
     return Number.isFinite(value) && value > 0 ? value : 1;
   });
+  let requestedSectionId = $derived($page.url.searchParams.get('sectionId') ?? null);
+  let requestedBlockId   = $derived($page.url.searchParams.get('blockId')   ?? null);
   let showLayoutDebug = $derived.by(() => {
     if (!dev) return false;
     const raw = $page.url.searchParams.get('debugLayout');
     return raw === '1' || raw === 'true';
   });
 
-  let loading   = $state(true);
-  let loadError = $state<string | null>(null);
-  let layout    = $state<PaginatedBookResult | null>(null);
-  let assets    = $state<Asset[]>([]);
+  let loading          = $state(true);
+  let loadError        = $state<string | null>(null);
+  let layout           = $state<PaginatedBookResult | null>(null);
+  let assets           = $state<Asset[]>([]);
+  let resolvedPage     = $state<number>(1);
 
   async function load() {
     loading   = true;
@@ -31,7 +34,20 @@
     try {
       const snap = await loadBookLayoutSnapshot(bookId);
       assets = await listAssets(bookId);
-      layout = await computePaginatedPreviewForBrowser(snap);
+      const result = await computePaginatedPreviewForBrowser(snap);
+      layout = result;
+
+      // Resolve semantic navigation (sectionId/blockId) using THIS layout.
+      // This avoids cross-computation drift between content page and preview page.
+      if (requestedSectionId) {
+        const target = findPreviewLocationForSelection(result, {
+          sectionId: requestedSectionId,
+          blockId: requestedBlockId,
+        });
+        resolvedPage = target ? target.physicalPageNumber : requestedPhysicalPage;
+      } else {
+        resolvedPage = requestedPhysicalPage;
+      }
     } catch (e) {
       loadError = e instanceof Error ? e.message : String(e);
     } finally {
@@ -65,7 +81,7 @@
       {bookId}
       {layout}
       {assets}
-      initialPhysicalPage={requestedPhysicalPage}
+      initialPhysicalPage={resolvedPage}
       showLayoutDebug={showLayoutDebug}
     />
   {/if}

@@ -75,11 +75,15 @@ function createWindow(): void {
     mainWindow.loadFile(join(app.getAppPath(), 'build', 'index.html'));
   }
 
-  // Mostrar la ventana solo cuando el contenido esté listo
-  // Evita el flash de ventana vacía al arrancar
-  mainWindow.once('ready-to-show', () => {
-    mainWindow?.show();
-  });
+  // Mostrar la ventana cuando el contenido esté listo.
+  // El fallback garantiza que la ventana aparezca aunque ready-to-show
+  // no se dispare (ej. fallo de GPU cache con múltiples instancias).
+  let shown = false;
+  const showOnce = () => {
+    if (!shown) { shown = true; mainWindow?.show(); }
+  };
+  mainWindow.once('ready-to-show', showOnce);
+  setTimeout(showOnce, 4000);
 
   // Abrir los links externos en el browser del sistema, no en Electron
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {

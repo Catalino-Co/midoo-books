@@ -13,9 +13,9 @@
   import { page }      from '$app/stores';
   import { goto }      from '$app/navigation';
   import {
-    listSections, createSection, updateSection, deleteSection, moveSectionInList,
+    listSections, createSection, updateSection, deleteSection, moveSectionInList, reorderSectionToIndex,
     duplicateSection,
-    listBlocks,   updateBlock,   deleteBlock,   moveBlockInList,
+    listBlocks,   updateBlock,   deleteBlock,   moveBlockInList, reorderBlockToIndex,
     createBlockInSection,
     createBlockFirstInSection,
     sectionTypeLabel,
@@ -78,11 +78,6 @@
     buildResolvedBookStyleDebug,
     type ResolvedBookStyleInfo,
   } from '$lib/services/styles.service';
-  import {
-    loadBookLayoutSnapshot,
-    computePaginatedPreview,
-    findPreviewLocationForSelection,
-  } from '$lib/services/preview-layout.service';
   import SectionTypeSelect from '$lib/components/SectionTypeSelect.svelte';
   import MarkdownImportUnifiedModal from '$lib/components/MarkdownImportUnifiedModal.svelte';
   import type {
@@ -121,12 +116,16 @@
   let newSectionError        = $state<string | null>(null);
   let duplicatingSectionId   = $state<string | null>(null);
 
-  // Creación de bloques (modal Insertar + atajos en fila / estado vacío)
+  // Creación de bloques (paleta unificada + atajos en fila / estado vacío)
   let quickBlockType         = $state<BlockType>(DEFAULT_BLOCK_TYPE);
   let addingBlock            = $state(false);
-  let showInsertBlockModal   = $state(false);
-  let insertBlockError       = $state<string | null>(null);
-  let showQuickInsertMenu    = $state(false);
+  let showBlockPalette       = $state(false);
+
+  // ── Drag & drop ───────────────────────────────────────────────────────────
+  let dragSectionId          = $state<string | null>(null);
+  let dragOverSectionIndex   = $state<number | null>(null);
+  let dragBlockId            = $state<string | null>(null);
+  let dragOverBlockIndex     = $state<number | null>(null);
 
   /** Comando / en textarea del inspector: menú de inserción de bloque siguiente */
   let slashMenuOpen          = $state(false);
@@ -198,6 +197,7 @@
   let inspectorSaving        = $state(false);
   let inspectorSaveOk        = $state(false);
   let inspectorError         = $state<string | null>(null);
+  let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   // ── Derivados ─────────────────────────────────────────────────────────────
   let selectedSection = $derived(
@@ -445,16 +445,11 @@
     openingPreview = true;
     globalError = null;
     try {
-      const snapshot = await loadBookLayoutSnapshot(bookId);
-      const layout = computePaginatedPreview(snapshot);
-      const target = findPreviewLocationForSelection(layout, {
-        sectionId: selectedSectionId,
-        blockId: selectedBlockId,
-      });
-      const href = target
-        ? `/books/${bookId}/preview?page=${target.physicalPageNumber}`
-        : `/books/${bookId}/preview`;
-      await goto(href);
+      await flushInspectorIfNeeded();
+      const url = new URL(`/books/${bookId}/preview`, window.location.origin);
+      url.searchParams.set('sectionId', selectedSectionId);
+      if (selectedBlockId) url.searchParams.set('blockId', selectedBlockId);
+      await goto(url.pathname + url.search);
     } catch (e) {
       globalError = e instanceof Error ? e.message : String(e);
     } finally {
@@ -462,7 +457,22 @@
     }
   }
 
-  async function flushInspectorIfNeeded() {
+  function cancelAutoSave() {
+    if (autoSaveTimer !== null) {
+      clearTimeout(autoSaveTimer);
+      autoSaveTimer = null;
+    }
+  }
+
+  function scheduleAutoSave() {
+    cancelAutoSave();
+    autoSaveTimer = setTimeout(() => {
+      autoSaveTimer = null;
+      void performAutoSave();
+    }, 800);
+  }
+
+  async function performAutoSave() {
     if (!inspectorDirty || inspectorSaving) return;
     if (inspectorMode === 'block' && selectedBlockId) {
       await saveBlock();
@@ -471,8 +481,14 @@
     }
   }
 
+  async function flushInspectorIfNeeded() {
+    cancelAutoSave();
+    await performAutoSave();
+  }
+
   async function onInspectorBlur() {
-    await flushInspectorIfNeeded();
+    cancelAutoSave();
+    await performAutoSave();
   }
 
   // ── Sincronización inspector ──────────────────────────────────────────────
@@ -526,6 +542,7 @@
   }
 
   function resetInspectorDirty() {
+    cancelAutoSave();
     inspectorDirty = false;
     inspectorSaveOk = false;
     inspectorError  = null;
@@ -565,6 +582,7 @@
     inspectorDirty  = true;
     inspectorSaveOk = false;
     inspectorError  = null;
+    scheduleAutoSave();
   }
 
   // ── Actualizar sección desde inspector ────────────────────────────────────
@@ -583,7 +601,7 @@
         sections = sections.map(s => s.id === updated.id ? updated : s);
         resetInspectorDirty();
         inspectorSaveOk = true;
-        setTimeout(() => (inspectorSaveOk = false), 2000);
+        setTimeout(() => (inspectorSaveOk = false), 2500);
       }
     } catch (e) {
       inspectorError = e instanceof Error ? e.message : String(e);
@@ -646,7 +664,7 @@
         blocks = blocks.map(b => b.id === updated.id ? updated : b);
         resetInspectorDirty();
         inspectorSaveOk = true;
-        setTimeout(() => (inspectorSaveOk = false), 2000);
+        setTimeout(() => (inspectorSaveOk = false), 2500);
       }
     } catch (e) {
       inspectorError = e instanceof Error ? e.message : String(e);
@@ -745,7 +763,6 @@
     if (where === 'after' && !selectedBlockId) return;
     addingBlock = true;
     globalError = null;
-    insertBlockError = null;
     const openingHint = coQuickTypeHint;
     if (openingHint) {
       globalError = openingHint;
@@ -761,11 +778,8 @@
       });
       blocks = await listBlocks(selectedSectionId);
       await selectBlock(created.id);
-      showInsertBlockModal = false;
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      globalError = msg;
-      insertBlockError = msg;
+      globalError = e instanceof Error ? e.message : String(e);
     } finally {
       addingBlock = false;
     }
@@ -945,7 +959,6 @@
     if (!selectedSectionId || addingBlock) return;
     addingBlock = true;
     globalError = null;
-    showQuickInsertMenu = false;
     const openingHint
       = type === 'CHAPTER_OPENING' && selectedSection?.sectionType !== 'CHAPTER'
         ? 'Sugerencia: «Apertura de capítulo» encaja mejor en secciones tipo Capítulo.'
@@ -1009,10 +1022,8 @@
     void onInspectorBlur();
   }
 
-  function openInsertBlockModal() {
-    insertBlockError = null;
-    showQuickInsertMenu = false;
-    showInsertBlockModal = true;
+  function openBlockPalette() {
+    showBlockPalette = true;
   }
 
   // ── Eliminar bloque ───────────────────────────────────────────────────────
@@ -1046,6 +1057,71 @@
     }
   }
 
+  // ── Drag & drop: secciones ────────────────────────────────────────────────
+  function onSectionDragStart(e: DragEvent, sectionId: string) {
+    dragSectionId = sectionId;
+    e.dataTransfer!.effectAllowed = 'move';
+    e.dataTransfer!.setData('text/plain', sectionId);
+  }
+  function onSectionDragOver(e: DragEvent, index: number) {
+    if (!dragSectionId) return;
+    e.preventDefault();
+    e.dataTransfer!.dropEffect = 'move';
+    dragOverSectionIndex = index;
+  }
+  function onSectionDragLeave() {
+    dragOverSectionIndex = null;
+  }
+  async function onSectionDrop(e: DragEvent, toIndex: number) {
+    e.preventDefault();
+    dragOverSectionIndex = null;
+    if (!dragSectionId) return;
+    const fromId = dragSectionId;
+    dragSectionId = null;
+    try {
+      sections = await reorderSectionToIndex(sections, fromId, toIndex);
+    } catch (err) {
+      globalError = err instanceof Error ? err.message : String(err);
+    }
+  }
+  function onSectionDragEnd() {
+    dragSectionId = null;
+    dragOverSectionIndex = null;
+  }
+
+  // ── Drag & drop: bloques ──────────────────────────────────────────────────
+  function onBlockDragStart(e: DragEvent, blockId: string) {
+    dragBlockId = blockId;
+    e.dataTransfer!.effectAllowed = 'move';
+    e.dataTransfer!.setData('text/plain', blockId);
+  }
+  function onBlockDragOver(e: DragEvent, index: number) {
+    if (!dragBlockId) return;
+    e.preventDefault();
+    e.dataTransfer!.dropEffect = 'move';
+    dragOverBlockIndex = index;
+  }
+  function onBlockDragLeave() {
+    dragOverBlockIndex = null;
+  }
+  async function onBlockDrop(e: DragEvent, toIndex: number) {
+    e.preventDefault();
+    dragOverBlockIndex = null;
+    if (!dragBlockId) return;
+    const fromId = dragBlockId;
+    dragBlockId = null;
+    await flushInspectorIfNeeded();
+    try {
+      blocks = await reorderBlockToIndex(blocks, fromId, toIndex);
+    } catch (err) {
+      globalError = err instanceof Error ? err.message : String(err);
+    }
+  }
+  function onBlockDragEnd() {
+    dragBlockId = null;
+    dragOverBlockIndex = null;
+  }
+
   let inspSurface = $derived(blockEditorSurface(insp_bType));
 
   let inspEditorWrapClass = $derived(
@@ -1060,10 +1136,17 @@
   );
 
   function onContentGlobalKeydown(e: KeyboardEvent) {
-    if (e.key !== 'Escape') return;
-    if (showQuickInsertMenu) {
-      showQuickInsertMenu = false;
+    if (e.key === 'Escape') {
+      if (showBlockPalette) {
+        showBlockPalette = false;
+        e.preventDefault();
+      }
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key === 's') {
       e.preventDefault();
+      cancelAutoSave();
+      void performAutoSave();
     }
   }
 
@@ -1226,73 +1309,6 @@
   </div>
 {/if}
 
-{#if showInsertBlockModal}
-  <div class="overlay" role="dialog" aria-modal="true" aria-labelledby="insert-block-title">
-    <div class="modal modal--insert-block">
-      <div class="modal-header">
-        <h3 id="insert-block-title" class="modal-title">Insertar bloque</h3>
-        <button
-          type="button"
-          class="modal-close"
-          onclick={() => { showInsertBlockModal = false; insertBlockError = null; }}
-          disabled={addingBlock}
-        >✕</button>
-      </div>
-      <div class="modal-form modal-form--flush">
-        {#if insertBlockError}
-          <div class="alert alert--error">{insertBlockError}</div>
-        {/if}
-        <div class="form-field">
-          <label class="form-label" for="ib-modal-type">Tipo de bloque</label>
-          <select
-            id="ib-modal-type"
-            class="form-input form-select"
-            bind:value={quickBlockType}
-            disabled={addingBlock}
-          >
-            {#each ALL_BLOCK_TYPES as t}
-              <option value={t}>{blockTypeLabel(t)}</option>
-            {/each}
-          </select>
-        </div>
-        {#if coQuickTypeHint}
-          <p class="modal-hint modal-hint--soft">{coQuickTypeHint}</p>
-        {/if}
-        <p class="modal-hint modal-hint--insert">
-          Elige dónde colocar el bloque. «Debajo del seleccionado» usa el bloque activo en la lista (resaltado).
-        </p>
-        <div class="modal-actions modal-actions--stack">
-          <button
-            type="button"
-            class="btn btn--primary btn--full"
-            disabled={addingBlock}
-            onclick={() => addBlockQuick('end')}
-          >
-            {#if addingBlock}<span class="spinner-sm"></span> Insertando…{:else}Al final de la sección{/if}
-          </button>
-          <button
-            type="button"
-            class="btn btn--ghost btn--full"
-            disabled={addingBlock || !selectedBlockId}
-            title={selectedBlockId ? '' : 'Selecciona un bloque en la lista'}
-            onclick={() => addBlockQuick('after')}
-          >
-            Debajo del bloque seleccionado
-          </button>
-        </div>
-        <p class="modal-footnote">Los textos se guardan al salir del campo o con «Guardar cambios» en el inspector.</p>
-        <button
-          type="button"
-          class="btn btn--ghost btn--full btn--mt"
-          disabled={addingBlock}
-          onclick={() => { showInsertBlockModal = false; insertBlockError = null; }}
-        >
-          Cancelar
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
 
 <MarkdownImportUnifiedModal
   bind:open={showMarkdownImportModal}
@@ -1359,24 +1375,30 @@
       {:else}
         <ul class="section-list" aria-label="Secciones del libro">
           {#each sections as section, i (section.id)}
-            <li class="section-row">
-              <!-- Order arrows -->
-              <div class="section-arrows">
-                <button
-                  type="button"
-                  class="arrow-btn"
-                  title="Subir"
-                  disabled={i === 0}
-                  onclick={() => moveSection(section.id, 'up')}
-                >▲</button>
-                <button
-                  type="button"
-                  class="arrow-btn"
-                  title="Bajar"
-                  disabled={i === sections.length - 1}
-                  onclick={() => moveSection(section.id, 'down')}
-                >▼</button>
-              </div>
+            <li
+              class="section-row"
+              class:section-row--active={selectedSectionId === section.id}
+              class:section-row--dragging={dragSectionId === section.id}
+              class:section-row--drop-target={dragOverSectionIndex === i && dragSectionId !== section.id}
+              ondragover={(e) => onSectionDragOver(e, i)}
+              ondragleave={onSectionDragLeave}
+              ondrop={(e) => onSectionDrop(e, i)}
+            >
+              <!-- Drag handle: only this element initiates dragging -->
+              <span
+                class="drag-handle drag-handle--section"
+                draggable="true"
+                title="Arrastrar para reordenar"
+                aria-hidden="true"
+                ondragstart={(e) => onSectionDragStart(e, section.id)}
+                ondragend={onSectionDragEnd}
+              >
+                <svg width="14" height="18" viewBox="0 0 14 18" fill="currentColor">
+                  <circle cx="4" cy="3"  r="1.8"/><circle cx="10" cy="3"  r="1.8"/>
+                  <circle cx="4" cy="9"  r="1.8"/><circle cx="10" cy="9"  r="1.8"/>
+                  <circle cx="4" cy="15" r="1.8"/><circle cx="10" cy="15" r="1.8"/>
+                </svg>
+              </span>
 
               <button
                 type="button"
@@ -1395,28 +1417,44 @@
                 </span>
               </button>
 
-              <!-- Duplicar / eliminar -->
-              <button
-                type="button"
-                class="icon-btn"
-                title="Duplicar sección"
-                disabled={duplicatingSectionId === section.id}
-                onclick={() => onDuplicateSection(section)}
-              >
-                {#if duplicatingSectionId === section.id}
-                  <span class="spinner-sm spinner-sm--light"></span>
-                {:else}
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                {/if}
-              </button>
-              <button
-                type="button"
-                class="icon-btn icon-btn--danger"
-                title="Eliminar sección"
-                onclick={() => (confirmDeleteSection = section)}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6M10 11v6M14 11v6M9 6V4h6v2"/></svg>
-              </button>
+              <!-- Acciones: visibles en hover/activo -->
+              <div class="section-actions">
+                <button
+                  type="button"
+                  class="arrow-btn"
+                  title="Subir"
+                  disabled={i === 0}
+                  onclick={() => moveSection(section.id, 'up')}
+                >▲</button>
+                <button
+                  type="button"
+                  class="arrow-btn"
+                  title="Bajar"
+                  disabled={i === sections.length - 1}
+                  onclick={() => moveSection(section.id, 'down')}
+                >▼</button>
+                <button
+                  type="button"
+                  class="icon-btn"
+                  title="Duplicar sección"
+                  disabled={duplicatingSectionId === section.id}
+                  onclick={() => onDuplicateSection(section)}
+                >
+                  {#if duplicatingSectionId === section.id}
+                    <span class="spinner-sm spinner-sm--light"></span>
+                  {:else}
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  {/if}
+                </button>
+                <button
+                  type="button"
+                  class="icon-btn icon-btn--danger"
+                  title="Eliminar sección"
+                  onclick={() => (confirmDeleteSection = section)}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6M10 11v6M14 11v6M9 6V4h6v2"/></svg>
+                </button>
+              </div>
             </li>
           {/each}
         </ul>
@@ -1460,50 +1498,59 @@
             class="btn btn--sm btn--ghost"
             onclick={openMarkdownImportModal}
             disabled={loadingBlocks}
-            title="Importar Markdown (sección actual o libro completo)"
+            title="Importar contenido desde Markdown"
           >
-            Importar Markdown
+            Markdown
           </button>
-          <div class="blocks-quick-insert-wrap">
+          <div class="block-palette-wrap">
             <button
               type="button"
-              class="btn btn--sm btn--ghost blocks-slash-btn"
-              onclick={() => { showQuickInsertMenu = !showQuickInsertMenu; }}
+              class="btn btn--sm btn--primary"
+              onclick={() => { showBlockPalette = !showBlockPalette; }}
               disabled={loadingBlocks}
-              title="Insertar bloque (atajo: escribe / en el inspector)"
-              aria-expanded={showQuickInsertMenu}
+              aria-expanded={showBlockPalette}
               aria-haspopup="true"
-            >/ Tipos</button>
-            {#if showQuickInsertMenu}
-              <div class="quick-insert-pop" role="menu" aria-label="Tipos de bloque">
-                {#each SLASH_INSERT_TYPES as t (t)}
+              title="Añadir bloque{selectedBlockId ? ' después del seleccionado' : ' al final'}"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+              Añadir
+            </button>
+            {#if showBlockPalette}
+              <div class="block-palette" role="menu" aria-label="Tipo de bloque a insertar">
+                <p class="block-palette-hint">
+                  {selectedBlockId ? 'Insertar después del bloque seleccionado' : 'Insertar al final de la sección'}
+                </p>
+                <div class="block-palette-grid">
+                  {#each SLASH_INSERT_TYPES as t (t)}
+                    <button
+                      type="button"
+                      class="block-palette-item"
+                      role="menuitem"
+                      disabled={addingBlock}
+                      onmousedown={(e) => e.preventDefault()}
+                      onclick={() => { showBlockPalette = false; void insertTypedBlockQuick(t); }}
+                    >
+                      <svg class="block-palette-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                        <path d={blockTypeIcon(t)}/>
+                      </svg>
+                      <span class="block-palette-label">{blockTypeLabel(t)}</span>
+                    </button>
+                  {/each}
+                </div>
+                <div class="block-palette-footer">
                   <button
                     type="button"
-                    class="quick-insert-row"
-                    role="menuitem"
-                    disabled={addingBlock}
+                    class="block-palette-md-link"
                     onmousedown={(e) => e.preventDefault()}
-                    onclick={() => void insertTypedBlockQuick(t)}
+                    onclick={() => { showBlockPalette = false; openMarkdownImportModal(); }}
                   >
-                    <svg class="quick-insert-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                      <path d={blockTypeIcon(t)}/>
-                    </svg>
-                    <span>{blockTypeLabel(t)}</span>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h7"/></svg>
+                    Importar desde Markdown
                   </button>
-                {/each}
+                </div>
               </div>
             {/if}
           </div>
-          <button
-            type="button"
-            class="btn btn--sm btn--primary"
-            onclick={openInsertBlockModal}
-            disabled={loadingBlocks}
-            title="Añadir un bloque nuevo"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-            Insertar
-          </button>
         </div>
       </div>
 
@@ -1519,20 +1566,15 @@
               <path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
             </svg>
             <p class="empty-write-title">Empieza a escribir esta sección</p>
-            <p class="empty-write-hint">Añade un párrafo, un título o una cita; usa <strong>Importar Markdown</strong>, <strong>/ Tipos</strong> o <strong>Insertar</strong>. Con un bloque seleccionado, escribe <strong>/</strong> en el inspector para insertar el siguiente bloque.</p>
-            <div class="empty-write-actions">
-              <select class="quick-type-select quick-type-select--solo" bind:value={quickBlockType} disabled={addingBlock}>
-                {#each ALL_BLOCK_TYPES as t}
-                  <option value={t}>{blockTypeLabel(t)}</option>
-                {/each}
-              </select>
-              {#if coQuickTypeHint}
-                <p class="empty-co-hint">{coQuickTypeHint}</p>
-              {/if}
-              <button type="button" class="btn btn--sm btn--primary" disabled={addingBlock} onclick={() => addBlockQuick('end')}>
-                {#if addingBlock}<span class="spinner-sm spinner-sm--light"></span>{:else}Primer bloque{/if}
-              </button>
-            </div>
+            <p class="empty-write-hint">Usa el botón <strong>+ Añadir</strong> del encabezado para insertar el primer bloque, o escribe <strong>/</strong> en el inspector para insertar el siguiente.</p>
+            <button
+              type="button"
+              class="btn btn--sm btn--primary"
+              disabled={addingBlock}
+              onclick={openBlockPalette}
+            >
+              {#if addingBlock}<span class="spinner-sm spinner-sm--light"></span> Insertando…{:else}+ Añadir primer bloque{/if}
+            </button>
           </div>
         {:else}
           <div class="manuscript-stage">
@@ -1550,6 +1592,8 @@
                 <section
                   class="manuscript-block block-item"
                   class:block-item--active={selectedBlockId === block.id}
+                  class:block-item--dragging={dragBlockId === block.id}
+                  class:block-item--drop-target={dragOverBlockIndex === i && dragBlockId !== block.id}
                   role="button"
                   tabindex="0"
                   aria-label="Bloque {i + 1}, {blockTypeLabel(block.blockType)}. Elegir para editar."
@@ -1561,8 +1605,26 @@
                       void selectBlock(block.id);
                     }
                   }}
+                  ondragover={(e) => onBlockDragOver(e, i)}
+                  ondragleave={onBlockDragLeave}
+                  ondrop={(e) => onBlockDrop(e, i)}
                 >
                   <header class="manuscript-block-meta">
+                    <!-- Drag handle: only this element initiates dragging -->
+                    <span
+                      class="drag-handle drag-handle--block"
+                      draggable="true"
+                      title="Arrastrar para reordenar"
+                      aria-hidden="true"
+                      ondragstart={(e) => onBlockDragStart(e, block.id)}
+                      ondragend={onBlockDragEnd}
+                    >
+                      <svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor">
+                        <circle cx="3.5" cy="2.5"  r="1.6"/><circle cx="8.5" cy="2.5"  r="1.6"/>
+                        <circle cx="3.5" cy="8"    r="1.6"/><circle cx="8.5" cy="8"    r="1.6"/>
+                        <circle cx="3.5" cy="13.5" r="1.6"/><circle cx="8.5" cy="13.5" r="1.6"/>
+                      </svg>
+                    </span>
                     <span class="block-idx" title="Orden en la sección">#{i + 1}</span>
                     <div class="block-type-chip">
                       <svg class="block-chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
@@ -1663,8 +1725,20 @@
         {:else if inspectorMode === 'section'}Inspector de sección
         {:else}Inspector{/if}
       </span>
-      {#if inspectorDirty}
-        <span class="dirty-dot" title="Cambios sin guardar"></span>
+      {#if inspectorSaving}
+        <span class="save-status save-status--saving">
+          <span class="spinner-xs"></span>Guardando…
+        </span>
+      {:else if inspectorError}
+        <span class="save-status save-status--error" title={inspectorError}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+          Error
+        </span>
+      {:else if inspectorSaveOk}
+        <span class="save-status save-status--ok">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          Guardado
+        </span>
       {/if}
     </div>
 
@@ -2316,7 +2390,7 @@
 
     </div><!-- end panel-body -->
 
-    <!-- Footer del inspector: botón guardar -->
+    <!-- Footer del inspector -->
     {#if inspectorMode !== 'none'}
       <div class="panel-footer inspector-footer">
         <button
@@ -2328,21 +2402,11 @@
           {openingPreview ? 'Abriendo preview…' : 'Ir a esta página en preview'}
         </button>
         {#if inspectorError}
-          <div class="alert alert--error alert--compact">{inspectorError}</div>
+          <div class="alert alert--error alert--compact">
+            <span>{inspectorError}</span>
+            <button type="button" class="alert-close-inline" onclick={() => (inspectorError = null)}>✕</button>
+          </div>
         {/if}
-        <button
-          class="btn btn--primary btn--full"
-          onclick={() => inspectorMode === 'block' ? saveBlock() : saveSection()}
-          disabled={!inspectorDirty || inspectorSaving}
-        >
-          {#if inspectorSaving}
-            <span class="spinner-sm"></span> Guardando…
-          {:else if inspectorSaveOk}
-            ✓ Guardado
-          {:else}
-            Guardar cambios
-          {/if}
-        </button>
       </div>
     {/if}
   </aside>
@@ -2418,6 +2482,19 @@
     color: #f09090;
   }
   .alert-close:hover { opacity: 1; }
+
+  .alert-close-inline {
+    background: none;
+    border: none;
+    color: #f09090;
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1;
+    padding: 0 2px;
+    opacity: 0.6;
+    flex-shrink: 0;
+  }
+  .alert-close-inline:hover { opacity: 1; }
 
   /* ═══════════════════════════════════════════════════════════════════════════
      PANELES
@@ -2535,19 +2612,54 @@
 
   .panel-empty p { margin: 0; }
 
-  /* Dirty dot */
-  .dirty-dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--editor-accent);
+  /* Save status — indicador compacto en el header del inspector */
+  .save-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 2px 7px;
+    border-radius: 10px;
     flex-shrink: 0;
-    animation: pulse 1.5s ease-in-out infinite;
+    white-space: nowrap;
+  }
+
+  .save-status--saving {
+    color: var(--editor-accent);
+    background: rgba(122, 184, 232, 0.1);
+  }
+
+  .save-status--ok {
+    color: #6fcf97;
+    background: rgba(111, 207, 151, 0.1);
+    animation: save-ok-in 0.2s ease;
+  }
+
+  .save-status--error {
+    color: #f09090;
+    background: rgba(200, 80, 80, 0.12);
+    cursor: help;
+  }
+
+  @keyframes save-ok-in {
+    from { opacity: 0; transform: scale(0.9); }
+    to   { opacity: 1; transform: scale(1); }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .dirty-dot {
-      animation: none;
-    }
+    .save-status--ok { animation: none; }
+  }
+
+  /* Spinner extra-pequeño para el indicador de guardado */
+  .spinner-xs {
+    width: 9px; height: 9px;
+    border: 1.5px solid rgba(122, 184, 232, 0.3);
+    border-top-color: var(--editor-accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
   }
 
   /* ═══════════════════════════════════════════════════════════════════════════
@@ -2562,8 +2674,15 @@
   .section-row {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 0 6px 0 0;
+    gap: 2px;
+    padding: 0 4px 0 0;
+    transition: opacity 0.15s;
+  }
+  .section-row--dragging {
+    opacity: 0.35;
+  }
+  .section-row--drop-target {
+    box-shadow: inset 0 2px 0 0 var(--editor-accent);
   }
 
   .section-item-main {
@@ -2602,13 +2721,39 @@
     box-shadow: inset 0 0 0 1px var(--editor-accent-glow);
   }
 
-  /* Flechas de orden de sección */
-  .section-arrows {
+  /* Acciones de sección: ocultas hasta hover/activo/focus */
+  .section-actions {
     display: flex;
-    flex-direction: column;
+    align-items: center;
     gap: 1px;
     flex-shrink: 0;
+    opacity: 0;
+    transition: opacity var(--editor-duration) var(--editor-ease);
   }
+
+  .section-row:hover .section-actions,
+  .section-row--active .section-actions,
+  .section-row:focus-within .section-actions {
+    opacity: 1;
+  }
+
+  /* Drag handle */
+  .drag-handle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: rgba(255,255,255,0.45);
+    cursor: grab;
+    opacity: 1;
+    transition: color 0.12s;
+    user-select: none;
+    -webkit-user-drag: element;
+  }
+  .drag-handle:hover  { color: rgba(255,255,255,0.85); }
+  .drag-handle:active { cursor: grabbing; color: rgba(255,255,255,0.9); }
+  .drag-handle--section { padding: 4px 4px 4px 8px; min-width: 26px; }
+  .drag-handle--block   { padding: 2px 4px 2px 0;   min-width: 20px; }
 
   .arrow-btn {
     background: none;
@@ -2714,79 +2859,126 @@
     flex-shrink: 0;
   }
 
-  .blocks-quick-insert-wrap {
+  /* ── Paleta unificada de inserción de bloques ──────────────────────────── */
+  .block-palette-wrap {
     position: relative;
   }
 
-  .blocks-slash-btn {
-    font-variant-numeric: tabular-nums;
-    letter-spacing: 0.02em;
-  }
-
-  .quick-insert-pop {
+  .block-palette {
     position: absolute;
-    top: calc(100% + 4px);
+    top: calc(100% + 6px);
     right: 0;
-    z-index: 30;
-    min-width: 220px;
-    max-height: min(320px, 52vh);
-    overflow-y: auto;
-    padding: 4px;
-    border-radius: 8px;
+    z-index: 40;
+    width: 280px;
+    border-radius: 10px;
     border: 1px solid var(--editor-border-strong);
     background: var(--editor-surface-elevated);
     box-shadow: var(--editor-shadow-popover);
-    animation: content-popover-in var(--editor-duration) var(--editor-ease);
+    overflow: hidden;
+    animation: palette-in var(--editor-duration) var(--editor-ease);
   }
 
-  @keyframes content-popover-in {
-    from {
-      opacity: 0;
-      transform: translateY(-4px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
+  @keyframes palette-in {
+    from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0)    scale(1); }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .quick-insert-pop {
-      animation: none;
-    }
+    .block-palette { animation: none; }
   }
 
-  .quick-insert-row {
+  .block-palette-hint {
+    margin: 0;
+    padding: 9px 12px 7px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--editor-text-faint);
+    border-bottom: 1px solid var(--editor-border);
+  }
+
+  .block-palette-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 2px;
+    padding: 6px;
+  }
+
+  .block-palette-item {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 7px 9px;
+    gap: 5px;
+    padding: 10px 6px 8px;
     border: none;
-    border-radius: 6px;
+    border-radius: 7px;
     background: transparent;
-    color: rgba(255, 255, 255, 0.82);
-    font-size: 12px;
+    color: rgba(255, 255, 255, 0.75);
     font-family: inherit;
-    text-align: left;
     cursor: pointer;
-    transition: background var(--editor-duration) var(--editor-ease);
+    transition: background var(--editor-duration) var(--editor-ease),
+                color var(--editor-duration) var(--editor-ease);
   }
 
-  .quick-insert-row:hover:not(:disabled) {
+  .block-palette-item:hover:not(:disabled) {
     background: var(--editor-accent-soft);
+    color: #d6ecff;
   }
 
-  .quick-insert-row:disabled {
-    opacity: 0.45;
+  .block-palette-item:disabled {
+    opacity: 0.35;
     cursor: not-allowed;
   }
 
-  .quick-insert-ico {
-    width: 16px;
-    height: 16px;
+  .block-palette-icon {
+    width: 18px;
+    height: 18px;
     flex-shrink: 0;
-    opacity: 0.75;
+    opacity: 0.8;
+  }
+
+  .block-palette-item:hover:not(:disabled) .block-palette-icon {
+    opacity: 1;
+  }
+
+  .block-palette-label {
+    font-size: 10px;
+    font-weight: 500;
+    text-align: center;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+
+  .block-palette-footer {
+    border-top: 1px solid var(--editor-border);
+    padding: 6px;
+  }
+
+  .block-palette-md-link {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 11px;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--editor-duration) var(--editor-ease),
+                color var(--editor-duration) var(--editor-ease);
+  }
+
+  .block-palette-md-link:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.75);
   }
 
   .blocks-body {
@@ -2876,6 +3068,12 @@
     border-color: rgba(53, 99, 153, 0.3) !important;
     box-shadow: 0 0 0 1px rgba(53, 99, 153, 0.12);
   }
+  .manuscript-block.block-item.block-item--dragging {
+    opacity: 0.35;
+  }
+  .manuscript-block.block-item.block-item--drop-target {
+    box-shadow: 0 -2px 0 0 var(--editor-accent), 0 0 0 1px var(--editor-accent-glow);
+  }
 
   @media (prefers-reduced-motion: reduce) {
     .manuscript-block.block-item {
@@ -2920,6 +3118,12 @@
   .manuscript-doc .block-item:hover .block-actions,
   .manuscript-doc .block-item--active .block-actions {
     opacity: 1;
+  }
+  .manuscript-doc .drag-handle {
+    color: rgba(0, 0, 0, 0.35);
+  }
+  .manuscript-doc .drag-handle:hover {
+    color: rgba(0, 0, 0, 0.75);
   }
   .manuscript-doc .block-preview-text {
     white-space: pre-wrap;
@@ -2966,29 +3170,6 @@
     border-radius: 8px;
   }
 
-  .quick-type-select {
-    flex: 1;
-    min-width: 140px;
-    padding: 7px 10px;
-    border-radius: 6px;
-    border: 1px solid rgba(255,255,255,0.12);
-    background-color: #1f1f35;
-    color: #e8e8f4;
-    font-size: 12px;
-    font-family: inherit;
-    color-scheme: dark;
-  }
-
-  .quick-type-select--solo {
-    flex: 0 1 auto;
-    min-width: 160px;
-  }
-
-  .quick-type-select option {
-    background-color: #1a1a2e;
-    color: #e8e8f4;
-  }
-
   .panel-empty--write {
     max-width: 340px;
     margin: 0 auto;
@@ -3006,24 +3187,6 @@
     color: rgba(255,255,255,0.38);
     line-height: 1.5;
     margin: 0;
-  }
-
-  .empty-write-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    justify-content: center;
-    margin-top: 4px;
-  }
-
-  .empty-co-hint {
-    flex-basis: 100%;
-    width: 100%;
-    text-align: center;
-    font-size: 11px;
-    line-height: 1.45;
-    color: rgba(255, 210, 150, 0.82);
-    margin: 2px 0 0;
   }
 
   .inspector-empty-lead {
@@ -3940,36 +4103,8 @@
 
   .modal--sm { max-width: 400px; }
 
-  .modal--insert-block {
-    max-width: 420px;
-    /* Menú nativo del <select> en Chromium/Electron: evita lista blanca ilegible */
-    color-scheme: dark;
-  }
-
   .modal-form--flush {
     gap: 14px;
-  }
-
-  .form-select {
-    cursor: pointer;
-    color-scheme: dark;
-  }
-
-  /* Select del modal: fondo sólido oscuro (el rgba del .form-input a veces rompe el popup nativo) */
-  .form-input.form-select {
-    background-color: #1f1f35;
-    color: #e8e8f4;
-    border-color: rgba(255,255,255,0.14);
-  }
-
-  .form-input.form-select:focus {
-    background-color: #252542;
-    border-color: rgba(122,184,232,0.55);
-  }
-
-  .form-input.form-select option {
-    background-color: #1a1a2e;
-    color: #e8e8f4;
   }
 
   .modal-hint {
