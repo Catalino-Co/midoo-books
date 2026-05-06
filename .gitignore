@@ -21,6 +21,9 @@ release/
 .env.local
 .env.*.local
 
+# Claude Code
+.claude/worktrees/
+
 # Editor
 .vscode/settings.json
 .idea/
