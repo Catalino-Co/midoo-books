@@ -120,6 +120,7 @@
   let quickBlockType         = $state<BlockType>(DEFAULT_BLOCK_TYPE);
   let addingBlock            = $state(false);
   let showBlockPalette       = $state(false);
+  let focusMode              = $state(false);
 
   // ── Drag & drop ───────────────────────────────────────────────────────────
   let dragSectionId          = $state<string | null>(null);
@@ -279,6 +280,14 @@
     await loadSections();
     await loadBookAssets();
     await loadBookStylesContext();
+
+    function onGlobalKeydown(e: KeyboardEvent) {
+      if (e.key === 'Escape' && focusMode) {
+        focusMode = false;
+      }
+    }
+    document.addEventListener('keydown', onGlobalKeydown);
+    return () => document.removeEventListener('keydown', onGlobalKeydown);
   });
 
   $effect(() => {
@@ -1341,7 +1350,7 @@
 />
 
 <!-- ── Página principal ─────────────────────────────────────────────────── -->
-<div class="content-page">
+<div class="content-page" class:content-page--focus={focusMode}>
 
   <!-- Error global -->
   {#if globalError}
@@ -1358,7 +1367,7 @@
   {/if}
 
   <!-- ═════════════════ PANEL SECCIONES ════════════════════════════════════ -->
-  <aside class="panel panel--sections">
+  <aside class="panel panel--sections" class:panel--hidden={focusMode} aria-hidden={focusMode}>
     <div class="panel-header">
       <span class="panel-title">Estructura</span>
       <div class="panel-header-actions">
@@ -1515,6 +1524,21 @@
           <span class="blocks-section-badge">{sectionTypeLabel(selectedSection.sectionType)}</span>
         </div>
         <div class="blocks-header-actions">
+          <button
+            type="button"
+            class="btn btn--sm btn--ghost focus-toggle-btn"
+            class:focus-toggle-btn--active={focusMode}
+            onclick={() => { focusMode = !focusMode; }}
+            title={focusMode ? 'Salir del modo enfocado (Esc)' : 'Modo escritura enfocado'}
+          >
+            {#if focusMode}
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+              Salir
+            {:else}
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+              Enfocar
+            {/if}
+          </button>
           <button
             type="button"
             class="btn btn--sm btn--ghost"
@@ -1687,6 +1711,8 @@
                       <div class="inline-format-bar">
                         <button type="button" class="inline-ctx-chip" class:inline-ctx-chip--on={insp_bType === 'HEADING_1'} onclick={() => applyInspectorBlockType('HEADING_1')}>H1</button>
                         <button type="button" class="inline-ctx-chip" class:inline-ctx-chip--on={insp_bType === 'HEADING_2'} onclick={() => applyInspectorBlockType('HEADING_2')}>H2</button>
+                        <button type="button" class="inline-ctx-chip" class:inline-ctx-chip--on={insp_bType === 'HEADING_3'} onclick={() => applyInspectorBlockType('HEADING_3')}>H3</button>
+                        <button type="button" class="inline-ctx-chip" class:inline-ctx-chip--on={insp_bType === 'HEADING_4'} onclick={() => applyInspectorBlockType('HEADING_4')}>H4</button>
                         <button type="button" class="inline-ctx-chip" class:inline-ctx-chip--on={insp_bType === 'PARAGRAPH'} onclick={() => applyInspectorBlockType('PARAGRAPH')}>¶</button>
                         <button type="button" class="inline-ctx-chip" class:inline-ctx-chip--on={insp_bType === 'QUOTE'} onclick={() => applyInspectorBlockType('QUOTE')}>Cita</button>
                         <button type="button" class="inline-ctx-chip" class:inline-ctx-chip--on={insp_bType === 'CENTERED_PHRASE'} onclick={() => applyInspectorBlockType('CENTERED_PHRASE')}>Centro</button>
@@ -1725,9 +1751,11 @@
                           onselect={onInspectorContentSelect}
                           onblur={onInspectorBlur}
                           placeholder={
-                            insp_bType === 'HEADING_1'       ? 'Título principal…'
-                            : insp_bType === 'HEADING_2'     ? 'Subtítulo…'
-                            : insp_bType === 'QUOTE'         ? 'Cita o epígrafe…'
+                            insp_bType === 'HEADING_1'         ? 'Título principal…'
+                            : insp_bType === 'HEADING_2'       ? 'Subtítulo…'
+                            : insp_bType === 'HEADING_3'       ? 'Subtítulo 3…'
+                            : insp_bType === 'HEADING_4'       ? 'Subtítulo 4…'
+                            : insp_bType === 'QUOTE'           ? 'Cita o epígrafe…'
                             : insp_bType === 'CENTERED_PHRASE' ? 'Frase centrada…'
                             : 'Escribe aquí. Usa / para insertar el siguiente bloque…'
                           }
@@ -1798,7 +1826,7 @@
   </main>
 
   <!-- ═════════════════ INSPECTOR ══════════════════════════════════════════ -->
-  <aside class="panel panel--inspector">
+  <aside class="panel panel--inspector" class:panel--hidden={focusMode} aria-hidden={focusMode}>
     <div class="panel-header">
       <span class="panel-title">
         {#if inspectorMode === 'block'}Inspector de bloque
@@ -2446,6 +2474,37 @@
   .alert-close-inline:hover { opacity: 1; }
 
   /* ═══════════════════════════════════════════════════════════════════════════
+     MODO ESCRITURA ENFOCADO
+  ═══════════════════════════════════════════════════════════════════════════ */
+  .panel--hidden {
+    width: 0 !important;
+    min-width: 0 !important;
+    overflow: hidden;
+    border: none !important;
+    flex-shrink: 0;
+    transition: width 0.25s ease;
+    pointer-events: none;
+  }
+
+  .content-page--focus .manuscript-doc {
+    width: min(820px, calc(100% - 64px));
+  }
+
+  .content-page--focus .manuscript-stage {
+    padding: 32px 0 80px;
+  }
+
+  .focus-toggle-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .focus-toggle-btn--active {
+    color: var(--editor-accent, #7ab8e8);
+    border-color: var(--editor-accent-border, rgba(122,184,232,0.35));
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════════
      PANELES
   ═══════════════════════════════════════════════════════════════════════════ */
   .panel {
@@ -2459,6 +2518,7 @@
     width: 236px;
     border-right: 1px solid var(--editor-border);
     background: var(--editor-surface-void);
+    transition: width 0.25s ease;
   }
 
   .panel--blocks {
@@ -2474,6 +2534,7 @@
   .panel--inspector {
     width: 272px;
     background: var(--editor-surface-inspector);
+    transition: width 0.25s ease;
   }
 
   /* Panel header */
@@ -3556,6 +3617,17 @@
   .block-inline-textarea--heading-2 {
     font-size: 16px;
     font-weight: 600;
+  }
+  .block-inline-textarea--heading-3 {
+    font-size: 14px;
+    font-weight: 600;
+    font-style: italic;
+  }
+  .block-inline-textarea--heading-4 {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
   .block-inline-textarea--paragraph {
     font-size: 13px;

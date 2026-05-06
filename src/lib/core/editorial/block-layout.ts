@@ -60,6 +60,10 @@ function typeLayoutDefaults(blockType: BlockType): BlockLayoutStyle {
       return { textAlign: 'left', widthMode: 'full', emphasis: 'strong' };
     case 'HEADING_2':
       return { textAlign: 'left', widthMode: 'full', emphasis: 'normal' };
+    case 'HEADING_3':
+      return { textAlign: 'left', widthMode: 'full', emphasis: 'normal' };
+    case 'HEADING_4':
+      return { textAlign: 'left', widthMode: 'full', emphasis: 'normal' };
     case 'QUOTE':
       return { textAlign: 'left', widthMode: 'medium', emphasis: 'normal' };
     case 'CENTERED_PHRASE':

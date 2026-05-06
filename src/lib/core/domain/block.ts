@@ -18,6 +18,8 @@ export function asBlockId(id: string): BlockId {
 export const BLOCK_TYPE_VALUES = [
   'HEADING_1',
   'HEADING_2',
+  'HEADING_3',
+  'HEADING_4',
   'CHAPTER_OPENING',
   'PARAGRAPH',
   'QUOTE',
@@ -41,6 +43,8 @@ export function normalizeBlockType(raw: string): BlockType {
   const fromLower: Record<string, BlockType> = {
     heading_1: 'HEADING_1',
     heading_2: 'HEADING_2',
+    heading_3: 'HEADING_3',
+    heading_4: 'HEADING_4',
     paragraph: 'PARAGRAPH',
     quote: 'QUOTE',
     image: 'IMAGE',

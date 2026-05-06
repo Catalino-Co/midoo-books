@@ -137,7 +137,12 @@
               class:style-item--active={entry.role === selectedRole}
               onclick={() => { selectedRole = entry.role; }}
             >
-              <span class="style-item__label">{entry.label}</span>
+              <div class="style-item__header">
+                <span class="style-item__label">{entry.label}</span>
+                {#if entry.blockTypeHint}
+                  <span class="style-item__block-chip">{entry.blockTypeHint}</span>
+                {/if}
+              </div>
               <span class="style-item__desc">{entry.description}</span>
             </button>
           {/each}
@@ -444,11 +449,30 @@
     border-color: rgba(122,184,232,0.55);
     background: rgba(122,184,232,0.12);
   }
+  .style-item__header {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
   .style-item__label {
-    display: block;
     font-size: 13px;
     font-weight: 700;
     color: rgba(255,255,255,0.88);
+  }
+  .style-item__block-chip {
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(122,184,232,0.14);
+    border: 1px solid rgba(122,184,232,0.28);
+    color: rgba(122,184,232,0.9);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+  .style-item--active .style-item__block-chip {
+    background: rgba(122,184,232,0.22);
+    border-color: rgba(122,184,232,0.5);
   }
   .style-item__desc {
     display: block;

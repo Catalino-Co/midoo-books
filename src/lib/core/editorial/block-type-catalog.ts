@@ -18,6 +18,8 @@ export type BlockEditorSurface =
 export const BLOCK_TYPE_LABELS: Record<BlockType, string> = {
   HEADING_1:       'Título principal',
   HEADING_2:       'Subtítulo',
+  HEADING_3:       'Subtítulo 3',
+  HEADING_4:       'Subtítulo 4',
   CHAPTER_OPENING: 'Apertura de capítulo',
   PARAGRAPH:       'Párrafo',
   QUOTE:           'Cita',
@@ -30,6 +32,8 @@ export const BLOCK_TYPE_LABELS: Record<BlockType, string> = {
 export const ALL_BLOCK_TYPES: BlockType[] = [
   'HEADING_1',
   'HEADING_2',
+  'HEADING_3',
+  'HEADING_4',
   'CHAPTER_OPENING',
   'PARAGRAPH',
   'QUOTE',
@@ -48,6 +52,8 @@ export function blockEditorSurface(type: BlockType): BlockEditorSurface {
   switch (type) {
     case 'HEADING_1':
     case 'HEADING_2':
+    case 'HEADING_3':
+    case 'HEADING_4':
       return 'short';
     case 'PARAGRAPH':
     case 'QUOTE':
@@ -68,7 +74,7 @@ export function blockEditorSurface(type: BlockType): BlockEditorSurface {
 }
 
 export function blockShowsIncludeInToc(type: BlockType): boolean {
-  return type === 'HEADING_1' || type === 'HEADING_2';
+  return type === 'HEADING_1' || type === 'HEADING_2' || type === 'HEADING_3' || type === 'HEADING_4';
 }
 
 export function blockShowsStyleVariant(type: BlockType): boolean {
@@ -98,6 +104,8 @@ export function blockTypeIcon(type: BlockType): string {
   const icons: Record<BlockType, string> = {
     HEADING_1:       'M4 6h16M4 12h12M4 18h8',
     HEADING_2:       'M4 8h16M4 14h14',
+    HEADING_3:       'M4 9h16M4 15h12',
+    HEADING_4:       'M4 10h16M4 16h10',
     PARAGRAPH:       'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM9 13h6M9 17h6M9 9h1',
     QUOTE:           'M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1zm12 0c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z',
     CHAPTER_OPENING:
@@ -123,6 +131,8 @@ export function blockEmptyPreviewHint(type: BlockType): string {
       return 'Apertura (sin imagen ni texto)';
     case 'HEADING_1':
     case 'HEADING_2':
+    case 'HEADING_3':
+    case 'HEADING_4':
       return 'Sin título';
     case 'CENTERED_PHRASE':
       return 'Texto centrado';

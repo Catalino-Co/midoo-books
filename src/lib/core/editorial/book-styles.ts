@@ -8,6 +8,8 @@ export const BOOK_STYLE_ROLE_VALUES = [
   'TITLE',
   'HEADING_1',
   'HEADING_2',
+  'HEADING_3',
+  'HEADING_4',
   'PARAGRAPH',
   'QUOTE',
   'CENTERED_PHRASE',
@@ -39,6 +41,8 @@ export interface BookStyleRoleMeta {
   label: string;
   description: string;
   sampleText: string;
+  /** Etiqueta del tipo de bloque en el editor de contenido que usa este rol. */
+  blockTypeHint?: string;
 }
 
 export interface ResolvedBookStyleInfo {
@@ -52,38 +56,58 @@ export const BOOK_STYLE_ROLE_CATALOG: BookStyleRoleMeta[] = [
   {
     role: 'TITLE',
     label: 'Título principal',
-    description: 'Título principal usado en portada, página de título y aperturas editoriales equivalentes.',
+    description: 'Portada, página de título y aperturas. Usa el bloque H1 en secciones de portada/créditos.',
     sampleText: 'Caminando con el Nazareno',
+    blockTypeHint: 'H1 (en portada/créditos)',
   },
   {
     role: 'HEADING_1',
-    label: 'Título de sección',
-    description: 'Título principal dentro del flujo de secciones o capítulos.',
+    label: 'Título de sección (H1)',
+    description: 'Título principal dentro del flujo de capítulos y secciones de contenido.',
     sampleText: 'Una invitación a caminar.',
+    blockTypeHint: 'H1',
   },
   {
     role: 'HEADING_2',
-    label: 'Subtítulo',
-    description: 'Subtítulo de segundo nivel.',
+    label: 'Subtítulo (H2)',
+    description: 'Subtítulo de segundo nivel dentro de una sección.',
     sampleText: 'Los primeros pasos del relato',
+    blockTypeHint: 'H2',
+  },
+  {
+    role: 'HEADING_3',
+    label: 'Subtítulo 3 (H3)',
+    description: 'Encabezado de tercer nivel. Ideal para títulos de prólogo, epílogo u otras páginas especiales.',
+    sampleText: 'Prólogo',
+    blockTypeHint: 'H3',
+  },
+  {
+    role: 'HEADING_4',
+    label: 'Subtítulo 4 (H4)',
+    description: 'Encabezado de cuarto nivel. Para sub-secciones internas o etiquetas de bloque.',
+    sampleText: 'Nota del autor',
+    blockTypeHint: 'H4',
   },
   {
     role: 'PARAGRAPH',
     label: 'Párrafo',
     description: 'Texto corrido principal del libro.',
     sampleText: 'Hay historias que comienzan con una mirada, una conversación o un gesto de compasión.',
+    blockTypeHint: 'Párrafo',
   },
   {
     role: 'QUOTE',
     label: 'Cita',
     description: 'Cita o texto destacado dentro del flujo.',
-    sampleText: '“Cada encuentro con Él fue una semilla de eternidad sembrada en tierra humana.”',
+    sampleText: '”Cada encuentro con Él fue una semilla de eternidad sembrada en tierra humana.”',
+    blockTypeHint: 'Cita',
   },
   {
     role: 'CENTERED_PHRASE',
     label: 'Línea centrada',
     description: 'Línea breve centrada para dedicatorias o separadores.',
     sampleText: 'Para quienes siguen caminando con fe.',
+    blockTypeHint: 'Centro',
   },
   {
     role: 'TOC_ENTRY',
@@ -184,6 +208,28 @@ export function buildDefaultBookStyles(
       letterSpacing: 0,
       marginTop: 8,
       marginBottom: 6,
+      color: null,
+      maxWidth: null,
+    },
+    HEADING_3: {
+      fontSize: Math.round(bodySize * 1.15 * 10) / 10,
+      lineHeight: 1.3,
+      textAlign: 'left',
+      fontWeight: 600,
+      letterSpacing: 0,
+      marginTop: 6,
+      marginBottom: 4,
+      color: null,
+      maxWidth: null,
+    },
+    HEADING_4: {
+      fontSize: Math.round(bodySize * 1.0 * 10) / 10,
+      lineHeight: 1.35,
+      textAlign: 'left',
+      fontWeight: 600,
+      letterSpacing: 0.04,
+      marginTop: 5,
+      marginBottom: 3,
       color: null,
       maxWidth: null,
     },
@@ -339,6 +385,8 @@ export function resolveBookStyleRoleForBlock(
   switch (block.blockType) {
     case 'HEADING_1': return 'HEADING_1';
     case 'HEADING_2': return 'HEADING_2';
+    case 'HEADING_3': return 'HEADING_3';
+    case 'HEADING_4': return 'HEADING_4';
     case 'PARAGRAPH': return 'PARAGRAPH';
     case 'QUOTE': return 'QUOTE';
     case 'CENTERED_PHRASE': return 'CENTERED_PHRASE';
