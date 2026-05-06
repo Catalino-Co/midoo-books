@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { dev } from '$app/environment';
   import { page } from '$app/stores';
   import BookPagedPreview from '$lib/components/preview/BookPagedPreview.svelte';
   import { loadBookLayoutSnapshot, computePaginatedPreviewForBrowser } from '$lib/services/preview-layout.service';
@@ -11,6 +12,11 @@
     const raw = $page.url.searchParams.get('page');
     const value = raw ? Number.parseInt(raw, 10) : NaN;
     return Number.isFinite(value) && value > 0 ? value : 1;
+  });
+  let showLayoutDebug = $derived.by(() => {
+    if (!dev) return false;
+    const raw = $page.url.searchParams.get('debugLayout');
+    return raw === '1' || raw === 'true';
   });
 
   let loading   = $state(true);
@@ -55,7 +61,13 @@
   {:else if loading || !layout}
     <div class="loading">Cargando libro…</div>
   {:else}
-    <BookPagedPreview {bookId} {layout} {assets} initialPhysicalPage={requestedPhysicalPage} />
+    <BookPagedPreview
+      {bookId}
+      {layout}
+      {assets}
+      initialPhysicalPage={requestedPhysicalPage}
+      showLayoutDebug={showLayoutDebug}
+    />
   {/if}
 </div>
 

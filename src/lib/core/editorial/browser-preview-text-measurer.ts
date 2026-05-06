@@ -10,6 +10,7 @@ import type {
 } from './page-layout-engine';
 
 const PT_TO_PX = 96 / 72;
+const SPLIT_FIT_TOLERANCE_PX = 2;
 
 function marginTopPx(style: BookStyleDefinition, continuedFromPreviousPage: boolean): number {
   return continuedFromPreviousPage ? 0 : style.marginTop * PT_TO_PX;
@@ -94,7 +95,7 @@ export class BrowserPreviewTextMeasurer implements LayoutTextMeasurementAdapter 
         input.continuedFromPreviousPage,
         true,
       );
-      if (fragmentMeasure.totalHeightPx <= input.availableUnits) {
+      if (fragmentMeasure.totalHeightPx <= input.availableUnits + SPLIT_FIT_TOLERANCE_PX) {
         bestFitWords = mid;
         lo = mid + 1;
       } else {
@@ -116,7 +117,7 @@ export class BrowserPreviewTextMeasurer implements LayoutTextMeasurementAdapter 
         input.continuedFromPreviousPage,
         true,
       );
-      if (firstMeasure.totalHeightPx > input.availableUnits) continue;
+      if (firstMeasure.totalHeightPx > input.availableUnits + SPLIT_FIT_TOLERANCE_PX) continue;
       if (firstMeasure.lineCount < input.minLinesAtPageBottom) continue;
 
       const restMeasure = this.measureElement(

@@ -43,12 +43,14 @@ const PARAGRAPH_TOP_UNITS = 16;
 const PARAGRAPH_CONTINUATION_TOP_UNITS = 8;
 const QUOTE_TOP_UNITS = 20;
 const MIN_PARAGRAPH_LINES_PER_FRAGMENT = 2;
-const MIN_PARAGRAPH_LINES_AT_PAGE_BOTTOM = 2;
+const MIN_PARAGRAPH_LINES_AT_PAGE_BOTTOM = 1;
 const MIN_PARAGRAPH_LINES_AT_PAGE_TOP = 2;
 const KEEP_TOGETHER_MAX_PARAGRAPH_LINES = 4;
 const HEADING_KEEP_WITH_NEXT_LINES = 3;
 const SHORT_SPECIAL_BLOCK_MAX_UNITS = 220;
 const SPECIAL_BLOCK_MIN_BOTTOM_BREATHING_ROOM = 44;
+/** Solo holgura por redondeo medición/unidades; no inflar el presupuesto vertical (evita texto sobre el pie). */
+const PARAGRAPH_FIT_TOLERANCE_UNITS = 3;
 const TOC_ENTRY_UNITS = 26;
 const TOC_TITLE_UNITS = 52;
 const TOC_EMPTY_UNITS = 28;
@@ -532,13 +534,15 @@ class Paginator {
     maxUnits: number,
     continuedFromPreviousPage: boolean,
     paragraphStyle: BookStyleDefinition,
+    minLinesAtPageBottom: number,
+    minLinesAtPageTop: number,
   ): { first: string; rest: string; lineCount: number; startLine: number; widowOrphanAdjusted: boolean } | null {
     const lines = wrapTextToLines(
       text,
       charsPerLineForStyle(this.metrics.charsPerLine, paragraphStyle, this.bookStyles.PARAGRAPH),
     );
     if (lines.length <= 1) return null;
-    if (lines.length <= MIN_PARAGRAPH_LINES_AT_PAGE_BOTTOM + MIN_PARAGRAPH_LINES_AT_PAGE_TOP) {
+    if (lines.length <= minLinesAtPageBottom + minLinesAtPageTop) {
       return null;
     }
 
@@ -548,15 +552,15 @@ class Paginator {
     if (fitLines >= lines.length) return null;
 
     const minFirstLines = Math.min(
-      lines.length - MIN_PARAGRAPH_LINES_AT_PAGE_TOP,
-      Math.max(MIN_PARAGRAPH_LINES_AT_PAGE_BOTTOM, MIN_PARAGRAPH_LINES_PER_FRAGMENT),
+      lines.length - minLinesAtPageTop,
+      Math.max(minLinesAtPageBottom, 1),
     );
     if (fitLines < minFirstLines) return null;
 
     let widowOrphanAdjusted = false;
     const remainingLines = lines.length - fitLines;
-    if (remainingLines > 0 && remainingLines < MIN_PARAGRAPH_LINES_AT_PAGE_TOP) {
-      fitLines = lines.length - MIN_PARAGRAPH_LINES_AT_PAGE_TOP;
+    if (remainingLines > 0 && remainingLines < minLinesAtPageTop) {
+      fitLines = lines.length - minLinesAtPageTop;
       widowOrphanAdjusted = true;
     }
 
@@ -695,8 +699,14 @@ class Paginator {
       }
 
       const availableUnits = this.availableForPlacement();
+      const fitBudgetUnits = availableUnits + PARAGRAPH_FIT_TOLERANCE_UNITS;
       const measuringContinuation = continued || lineOffset > 0;
       const tailLines = wrapTextToLines(remainingText, paragraphChars);
+      const minLinesAtPageTopForSplit = tailLines.length <= 4 ? 1 : MIN_PARAGRAPH_LINES_AT_PAGE_TOP;
+      const minLinesAtPageBottomForSplit =
+        availableUnits < estimateParagraphFragmentUnits(2, measuringContinuation, paragraphStyle, true)
+          ? 1
+          : MIN_PARAGRAPH_LINES_AT_PAGE_BOTTOM;
       const measuredTail = this.measureTextBlockUnits(block, section, remainingText, {
         continuedFromPreviousPage: measuringContinuation,
         continuesOnNextPage: false,
@@ -704,7 +714,10 @@ class Paginator {
       const tailUnits = measuredTail?.totalUnits
         ?? estimateParagraphFragmentUnits(tailLines.length, continued, paragraphStyle, false);
 
-      if (tailUnits <= availableUnits || this.used === 0 && tailUnits <= this.metrics.pageBodyHeightUnits) {
+      if (
+        tailUnits <= fitBudgetUnits
+        || this.used === 0 && tailUnits <= this.metrics.pageBodyHeightUnits + PARAGRAPH_FIT_TOLERANCE_UNITS
+      ) {
         this.placePlacement(section, {
           block,
           textOverride: remainingText,
@@ -724,9 +737,16 @@ class Paginator {
         break;
       }
 
-      const split = this.splitParagraph(remainingText, availableUnits, continued, paragraphStyle);
+      const split = this.splitParagraph(
+        remainingText,
+        fitBudgetUnits,
+        measuringContinuation,
+        paragraphStyle,
+        minLinesAtPageBottomForSplit,
+        minLinesAtPageTopForSplit,
+      );
       const estimatedMaxLines = maxParagraphLinesForUnits(
-        availableUnits,
+        fitBudgetUnits,
         continued || lineOffset > 0,
         paragraphStyle,
       );
@@ -739,7 +759,7 @@ class Paginator {
             continuedFromPreviousPage: continued || lineOffset > 0,
             continuesOnNextPage: true,
           });
-          if (measured.totalUnits > availableUnits) return null;
+          if (measured.totalUnits > fitBudgetUnits) return null;
           return {
             first: split.first,
             rest: split.rest,
@@ -753,31 +773,14 @@ class Paginator {
         ? this.textMeasurement.splitParagraph({
           text: remainingText,
           style: paragraphStyle,
-          availableUnits,
-          continuedFromPreviousPage: continued || lineOffset > 0,
-          minLinesAtPageBottom: MIN_PARAGRAPH_LINES_AT_PAGE_BOTTOM,
-          minLinesAtPageTop: MIN_PARAGRAPH_LINES_AT_PAGE_TOP,
+          availableUnits: fitBudgetUnits,
+          continuedFromPreviousPage: measuringContinuation,
+          minLinesAtPageBottom: minLinesAtPageBottomForSplit,
+          minLinesAtPageTop: minLinesAtPageTopForSplit,
         })
         : null;
       const estimatedSplit = this.textMeasurement ? null : split;
-      const splitMode = measuredSplit
-        ? 'measured'
-        : measuredHeuristicSplit
-          ? 'measured-heuristic'
-          : estimatedSplit
-            ? 'estimated'
-            : 'none';
-
       if (!estimatedSplit && !measuredSplit && !measuredHeuristicSplit) {
-        this.pages[this.currentIdx].debugNotes.push(
-          [
-            'Split párrafo: sin corte válido',
-            `disp=${Math.round(availableUnits)}u`,
-            `maxEstimadas=${estimatedMaxLines}`,
-            `tailLíneas=${measuredTail?.lineCount ?? tailLines.length}`,
-            `offset=${lineOffset}`,
-          ].join(' · '),
-        );
         if (tailUnits > this.availableForPlacement() && this.used > 0) {
           this.startNewContentPage('Continuación de párrafo');
           continued = true;
@@ -825,17 +828,6 @@ class Paginator {
           ),
         };
       const h = effectiveSplit.measuredUnits;
-      this.pages[this.currentIdx].debugNotes.push(
-        [
-          'Split párrafo',
-          `modo=${splitMode}`,
-          `disp=${Math.round(availableUnits)}u`,
-          `maxEstimadas=${estimatedMaxLines}`,
-          `usadas=${effectiveSplit.lineCount}`,
-          `restantes=${Math.max(0, (measuredTail?.lineCount ?? tailLines.length) - effectiveSplit.lineCount)}`,
-          `offset=${lineOffset}`,
-        ].join(' · '),
-      );
       this.placePlacement(section, {
         block,
         textOverride: effectiveSplit.first,
