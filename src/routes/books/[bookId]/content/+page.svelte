@@ -1195,6 +1195,28 @@
     selectedBlockId = null;
     syncSectionToInspector();
   }
+
+  // ── Acciones de DOM ───────────────────────────────────────────────────────
+
+  function autoResize(node: HTMLTextAreaElement) {
+    function resize() {
+      node.style.height = 'auto';
+      node.style.height = node.scrollHeight + 'px';
+    }
+    node.style.overflow = 'hidden';
+    resize();
+    node.addEventListener('input', resize);
+    return { destroy: () => node.removeEventListener('input', resize) };
+  }
+
+  function focusEnd(node: HTMLTextAreaElement) {
+    // Foca el textarea y mueve el cursor al final del contenido
+    requestAnimationFrame(() => {
+      node.focus();
+      node.setSelectionRange(node.value.length, node.value.length);
+    });
+    return {};
+  }
 </script>
 
 <svelte:head>
@@ -1577,8 +1599,8 @@
             </button>
           </div>
         {:else}
-          <div class="manuscript-stage">
-            <article class="manuscript-doc" aria-label="Documento de la sección">
+          <div class="manuscript-stage" onclick={(e) => { if (e.target === e.currentTarget) void clearBlockSelection(); }}>
+            <article class="manuscript-doc" aria-label="Documento de la sección" onclick={(e) => { if (e.target === e.currentTarget) void clearBlockSelection(); }}>
               {#each blocks as block, i (block.id)}
                 <div class="manuscript-insert-row">
                   <button
@@ -1600,6 +1622,7 @@
                   aria-current={selectedBlockId === block.id ? 'true' : undefined}
                   onclick={() => selectBlock(block.id)}
                   onkeydown={(e) => {
+                    if (e.target !== e.currentTarget) return;
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
                       void selectBlock(block.id);
@@ -1658,6 +1681,62 @@
                     </div>
                   </header>
 
+                  {#if selectedBlockId === block.id && blockHasEditableText(blockEditorSurface(block.blockType))}
+                    <!-- ── Editor inline ──────────────────────────────────── -->
+                    <div class="block-inline-editor" onclick={(e) => e.stopPropagation()}>
+                      <div class="inline-format-bar">
+                        <button type="button" class="inline-ctx-chip" class:inline-ctx-chip--on={insp_bType === 'HEADING_1'} onclick={() => applyInspectorBlockType('HEADING_1')}>H1</button>
+                        <button type="button" class="inline-ctx-chip" class:inline-ctx-chip--on={insp_bType === 'HEADING_2'} onclick={() => applyInspectorBlockType('HEADING_2')}>H2</button>
+                        <button type="button" class="inline-ctx-chip" class:inline-ctx-chip--on={insp_bType === 'PARAGRAPH'} onclick={() => applyInspectorBlockType('PARAGRAPH')}>¶</button>
+                        <button type="button" class="inline-ctx-chip" class:inline-ctx-chip--on={insp_bType === 'QUOTE'} onclick={() => applyInspectorBlockType('QUOTE')}>Cita</button>
+                        <button type="button" class="inline-ctx-chip" class:inline-ctx-chip--on={insp_bType === 'CENTERED_PHRASE'} onclick={() => applyInspectorBlockType('CENTERED_PHRASE')}>Centro</button>
+                        <button type="button" class="inline-ctx-chip" class:inline-ctx-chip--on={insp_bType === 'SEPARATOR'} onclick={() => applyInspectorBlockType('SEPARATOR')}>—</button>
+                        <button type="button" class="inline-ctx-chip" class:inline-ctx-chip--on={insp_bType === 'PAGE_BREAK'} onclick={() => applyInspectorBlockType('PAGE_BREAK')}>Salto</button>
+                        <button type="button" class="inline-ctx-chip inline-ctx-chip--done" onclick={() => void clearBlockSelection()} title="Cerrar editor">✓ Listo</button>
+                      </div>
+                      <div class="inline-slash-host">
+                        {#if slashMenuOpen}
+                          <div class="slash-palette inline-slash-palette" role="listbox" aria-label="Insertar bloque siguiente">
+                            {#each slashFilteredTypes as t, sIdx (t)}
+                              <button
+                                type="button"
+                                class="slash-palette-row"
+                                class:slash-palette-row--active={sIdx === slashMenuSelectedIndex}
+                                role="option"
+                                aria-selected={sIdx === slashMenuSelectedIndex}
+                                onmousedown={(e) => e.preventDefault()}
+                                onclick={() => void insertBlockFromSlash(t)}
+                              >
+                                <svg class="slash-palette-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                                  <path d={blockTypeIcon(t)}/>
+                                </svg>
+                                <span class="slash-palette-label">{blockTypeLabel(t)}</span>
+                              </button>
+                            {/each}
+                          </div>
+                        {/if}
+                        <textarea
+                          class="block-inline-textarea block-inline-textarea--{insp_bType.toLowerCase().replace(/_/g, '-')}"
+                          bind:value={insp_bContentText}
+                          use:autoResize
+                          use:focusEnd
+                          oninput={onInspectorContentInput}
+                          onkeydown={onInspectorContentKeydown}
+                          onselect={onInspectorContentSelect}
+                          onblur={onInspectorBlur}
+                          placeholder={
+                            insp_bType === 'HEADING_1'       ? 'Título principal…'
+                            : insp_bType === 'HEADING_2'     ? 'Subtítulo…'
+                            : insp_bType === 'QUOTE'         ? 'Cita o epígrafe…'
+                            : insp_bType === 'CENTERED_PHRASE' ? 'Frase centrada…'
+                            : 'Escribe aquí. Usa / para insertar el siguiente bloque…'
+                          }
+                          aria-label="Contenido del bloque"
+                        ></textarea>
+                      </div>
+                    </div>
+                  {:else}
+                  <!-- ── Preview de solo lectura ────────────────────────── -->
                   <div
                     class="block-preview manuscript-block-content {block.blockType === 'CHAPTER_OPENING' ? '' : blockLayoutPreviewClassNames(block)}"
                     class:block-preview--with-thumb={block.blockType === 'IMAGE' && parseImageBlockContent(block.contentJson).assetId}
@@ -1708,6 +1787,7 @@
                       </span>
                     {/if}
                   </div>
+                  {/if}
                 </section>
               {/each}
             </article>
@@ -1856,18 +1936,6 @@
             ← Propiedades de la sección
           </button>
 
-          {#if blockHasEditableText(inspSurface)}
-            <div class="insp-context-bar" role="toolbar" aria-label="Formato rápido del bloque">
-              <button type="button" class="ctx-chip" class:ctx-chip--on={insp_bType === 'HEADING_1'} onclick={() => applyInspectorBlockType('HEADING_1')}>H1</button>
-              <button type="button" class="ctx-chip" class:ctx-chip--on={insp_bType === 'HEADING_2'} onclick={() => applyInspectorBlockType('HEADING_2')}>H2</button>
-              <button type="button" class="ctx-chip" class:ctx-chip--on={insp_bType === 'PARAGRAPH'} onclick={() => applyInspectorBlockType('PARAGRAPH')}>¶</button>
-              <button type="button" class="ctx-chip" class:ctx-chip--on={insp_bType === 'QUOTE'} onclick={() => applyInspectorBlockType('QUOTE')}>Cita</button>
-              <button type="button" class="ctx-chip" class:ctx-chip--on={insp_bType === 'CENTERED_PHRASE'} onclick={() => applyInspectorBlockType('CENTERED_PHRASE')}>Centro</button>
-              <button type="button" class="ctx-chip" class:ctx-chip--on={insp_bType === 'SEPARATOR'} onclick={() => applyInspectorBlockType('SEPARATOR')}>—</button>
-              <button type="button" class="ctx-chip" class:ctx-chip--on={insp_bType === 'PAGE_BREAK'} onclick={() => applyInspectorBlockType('PAGE_BREAK')}>Salto</button>
-            </div>
-          {/if}
-
           <div class="insp-field">
             <label class="insp-label" for="ib-type">Tipo de bloque</label>
             <select
@@ -1915,126 +1983,7 @@
             </div>
           {/if}
 
-          {#if inspSurface === 'short'}
-            <div class="insp-field">
-              <label class="insp-label" for="ib-text">Texto</label>
-              <div class="insp-slash-host">
-                {#if slashMenuOpen && blockHasEditableText(inspSurface)}
-                  <div class="slash-palette" role="listbox" aria-label="Insertar bloque siguiente">
-                    {#each slashFilteredTypes as t, sIdx (t)}
-                      <button
-                        type="button"
-                        class="slash-palette-row"
-                        class:slash-palette-row--active={sIdx === slashMenuSelectedIndex}
-                        role="option"
-                        aria-selected={sIdx === slashMenuSelectedIndex}
-                        onmousedown={(e) => e.preventDefault()}
-                        onclick={() => void insertBlockFromSlash(t)}
-                      >
-                        <svg class="slash-palette-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                          <path d={blockTypeIcon(t)}/>
-                        </svg>
-                        <span class="slash-palette-label">{blockTypeLabel(t)}</span>
-                      </button>
-                    {/each}
-                  </div>
-                {/if}
-                <div class={inspEditorWrapClass}>
-                  <textarea
-                    id="ib-text"
-                    class="insp-textarea insp-textarea--short"
-                    bind:value={insp_bContentText}
-                    oninput={onInspectorContentInput}
-                    onkeydown={onInspectorContentKeydown}
-                    onselect={onInspectorContentSelect}
-                    onblur={onInspectorBlur}
-                    rows={3}
-                    maxlength={2000}
-                    placeholder="Título o encabezado… Escribe / para insertar el siguiente bloque."
-                  ></textarea>
-                </div>
-              </div>
-            </div>
-          {:else if inspSurface === 'large'}
-            <div class="insp-field">
-              <label class="insp-label" for="ib-text">Contenido</label>
-              <div class="insp-slash-host">
-                {#if slashMenuOpen && blockHasEditableText(inspSurface)}
-                  <div class="slash-palette" role="listbox" aria-label="Insertar bloque siguiente">
-                    {#each slashFilteredTypes as t, sIdx (t)}
-                      <button
-                        type="button"
-                        class="slash-palette-row"
-                        class:slash-palette-row--active={sIdx === slashMenuSelectedIndex}
-                        role="option"
-                        aria-selected={sIdx === slashMenuSelectedIndex}
-                        onmousedown={(e) => e.preventDefault()}
-                        onclick={() => void insertBlockFromSlash(t)}
-                      >
-                        <svg class="slash-palette-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                          <path d={blockTypeIcon(t)}/>
-                        </svg>
-                        <span class="slash-palette-label">{blockTypeLabel(t)}</span>
-                      </button>
-                    {/each}
-                  </div>
-                {/if}
-                <div class={inspEditorWrapClass}>
-                  <textarea
-                    id="ib-text"
-                    class="insp-textarea insp-textarea--write"
-                    bind:value={insp_bContentText}
-                    oninput={onInspectorContentInput}
-                    onkeydown={onInspectorContentKeydown}
-                    onselect={onInspectorContentSelect}
-                    onblur={onInspectorBlur}
-                    rows={14}
-                    placeholder="Escribe aquí. Usa / para tipos de bloque (título, cita, salto…)."
-                  ></textarea>
-                </div>
-              </div>
-            </div>
-          {:else if inspSurface === 'medium'}
-            <div class="insp-field">
-              <label class="insp-label" for="ib-text">Texto centrado</label>
-              <div class="insp-slash-host">
-                {#if slashMenuOpen && blockHasEditableText(inspSurface)}
-                  <div class="slash-palette" role="listbox" aria-label="Insertar bloque siguiente">
-                    {#each slashFilteredTypes as t, sIdx (t)}
-                      <button
-                        type="button"
-                        class="slash-palette-row"
-                        class:slash-palette-row--active={sIdx === slashMenuSelectedIndex}
-                        role="option"
-                        aria-selected={sIdx === slashMenuSelectedIndex}
-                        onmousedown={(e) => e.preventDefault()}
-                        onclick={() => void insertBlockFromSlash(t)}
-                      >
-                        <svg class="slash-palette-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                          <path d={blockTypeIcon(t)}/>
-                        </svg>
-                        <span class="slash-palette-label">{blockTypeLabel(t)}</span>
-                      </button>
-                    {/each}
-                  </div>
-                {/if}
-                <div class={inspEditorWrapClass}>
-                  <textarea
-                    id="ib-text"
-                    class="insp-textarea"
-                    bind:value={insp_bContentText}
-                    oninput={onInspectorContentInput}
-                    onkeydown={onInspectorContentKeydown}
-                    onselect={onInspectorContentSelect}
-                    onblur={onInspectorBlur}
-                    rows={6}
-                    maxlength={1500}
-                    placeholder="Línea o frase centrada… / para insertar después."
-                  ></textarea>
-                </div>
-              </div>
-            </div>
-          {:else if inspSurface === 'image_placeholder'}
+          {#if inspSurface === 'image_placeholder'}
             <div class="insp-field">
               <label class="insp-label" for="ib-asset">Imagen del libro</label>
               <p class="insp-hint insp-hint--block">
@@ -3519,6 +3468,116 @@
   }
 
   .block-item--active .block-chip-label { color: #7ab8e8; }
+
+  /* ── Editor inline (panel central) ─────────────────────────────────────── */
+  .block-inline-editor {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .inline-format-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 6px 0 8px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    margin-bottom: 6px;
+  }
+
+  .inline-ctx-chip {
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    background: rgba(255, 255, 255, 0.55);
+    color: #444;
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+    line-height: 1.6;
+    transition: background 0.12s, color 0.12s;
+  }
+  .inline-ctx-chip:hover {
+    background: rgba(0, 0, 0, 0.07);
+  }
+  .inline-ctx-chip--on {
+    background: #2a2a4a;
+    color: #fff;
+    border-color: #2a2a4a;
+  }
+  .inline-ctx-chip--done {
+    margin-left: auto;
+    border-color: rgba(0, 0, 0, 0.2);
+    color: #555;
+  }
+  .inline-ctx-chip--done:hover {
+    background: rgba(0, 120, 0, 0.08);
+    border-color: rgba(0, 120, 0, 0.35);
+    color: #2a6a2a;
+  }
+
+  .inline-slash-host {
+    position: relative;
+  }
+
+  .inline-slash-palette {
+    position: absolute;
+    bottom: calc(100% + 4px);
+    left: 0;
+    z-index: 200;
+  }
+
+  .block-inline-textarea {
+    width: 100%;
+    resize: none;
+    overflow: hidden;
+    border: none;
+    outline: none;
+    background: transparent;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    color: #171717;
+    line-height: 1.7;
+    padding: 2px 0;
+    min-height: 2.4em;
+  }
+  .block-inline-textarea::placeholder {
+    color: rgba(0, 0, 0, 0.28);
+    font-style: italic;
+  }
+
+  /* Typography variants matching manuscript styles */
+  .block-inline-textarea--heading-1 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  .block-inline-textarea--heading-2 {
+    font-size: 16px;
+    font-weight: 600;
+  }
+  .block-inline-textarea--paragraph {
+    font-size: 13px;
+    text-align: justify;
+  }
+  .block-inline-textarea--quote {
+    font-size: 13px;
+    font-style: italic;
+    padding-left: 14px;
+    border-left: 3px solid rgba(0, 0, 0, 0.18);
+  }
+  .block-inline-textarea--centered-phrase {
+    font-size: 14px;
+    text-align: center;
+    font-style: italic;
+  }
+  .block-inline-textarea--separator {
+    text-align: center;
+    font-size: 20px;
+    letter-spacing: 0.4em;
+    min-height: 1.6em;
+  }
 
   /* Preview del contenido */
   .block-preview {
