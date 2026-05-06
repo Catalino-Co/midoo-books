@@ -200,7 +200,13 @@ export class BrowserPreviewTextMeasurer implements LayoutTextMeasurementAdapter 
     if (style.color) element.style.color = style.color;
     if (style.maxWidth != null) {
       element.style.maxWidth = `${style.maxWidth}%`;
-      element.style.marginInline = 'auto';
+      if (style.textAlign === 'right') {
+        element.style.marginInline = 'auto 0';
+      } else if (style.textAlign === 'left') {
+        element.style.marginInline = '0 auto';
+      } else {
+        element.style.marginInline = 'auto';
+      }
     }
 
     let verticalPaddingPx = 0;
@@ -241,4 +247,3 @@ export class BrowserPreviewTextMeasurer implements LayoutTextMeasurementAdapter 
     }
   }
 }
-

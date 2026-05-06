@@ -433,7 +433,13 @@ export function buildBookStyleCss(
   if (style.color) parts.push(`color:${style.color}`);
   if (options.includeMaxWidth !== false && style.maxWidth != null) {
     parts.push(`max-width:${style.maxWidth}%`);
-    parts.push('margin-inline:auto');
+    if (style.textAlign === 'right') {
+      parts.push('margin-inline:auto 0');
+    } else if (style.textAlign === 'left') {
+      parts.push('margin-inline:0 auto');
+    } else {
+      parts.push('margin-inline:auto');
+    }
   }
   return parts.join(';');
 }
