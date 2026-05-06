@@ -1366,108 +1366,113 @@
             </div>
           </div>
         {:else}
-          <ul class="block-list">
-            {#each blocks as block, i (block.id)}
-              <!-- svelte-ignore a11y_click_events_have_key_events -->
-              <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-              <li
-                class="block-item"
-                class:block-item--active={selectedBlockId === block.id}
-                onclick={() => selectBlock(block.id)}
-              >
-                <span class="block-idx" title="Orden en la sección">#{i + 1}</span>
-                <div class="block-type-chip">
-                  <svg class="block-chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                    <path d={blockTypeIcon(block.blockType)}/>
-                  </svg>
-                  <span class="block-chip-label">{blockTypeLabel(block.blockType)}</span>
+          <div class="manuscript-stage">
+            <article class="manuscript-doc" aria-label="Documento de la sección">
+              {#each blocks as block, i (block.id)}
+                <div class="manuscript-insert-row">
+                  <button
+                    type="button"
+                    class="manuscript-insert-btn"
+                    title="Insertar bloque debajo"
+                    disabled={addingBlock}
+                    onclick={() => addBlockBelow(block.id)}
+                  >+</button>
                 </div>
-
-                <div
-                  class="block-preview {block.blockType === 'CHAPTER_OPENING' ? '' : blockLayoutPreviewClassNames(block)}"
-                  class:block-preview--with-thumb={block.blockType === 'IMAGE' && parseImageBlockContent(block.contentJson).assetId}
-                  class:block-preview--co-wrap={block.blockType === 'CHAPTER_OPENING'}
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                <section
+                  class="manuscript-block block-item"
+                  class:block-item--active={selectedBlockId === block.id}
+                  onclick={() => selectBlock(block.id)}
                 >
-                  {#if block.blockType === 'CHAPTER_OPENING'}
-                    {@const co = parseChapterOpeningContent(block.contentJson)}
-                    <div class="block-preview-co {chapterOpeningPreviewRootClassNames(co)}">
-                      {#if co.assetId}
-                        {@const ast = bookAssets.find(a => a.id === co.assetId)}
+                  <header class="manuscript-block-meta">
+                    <span class="block-idx" title="Orden en la sección">#{i + 1}</span>
+                    <div class="block-type-chip">
+                      <svg class="block-chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                        <path d={blockTypeIcon(block.blockType)}/>
+                      </svg>
+                      <span class="block-chip-label">{blockTypeLabel(block.blockType)}</span>
+                    </div>
+                    <div class="block-actions">
+                      <button
+                        type="button"
+                        class="arrow-btn"
+                        title="Subir"
+                        disabled={i === 0}
+                        onclick={(e) => { e.stopPropagation(); moveBlock(block.id, 'up'); }}
+                      >▲</button>
+                      <button
+                        type="button"
+                        class="arrow-btn"
+                        title="Bajar"
+                        disabled={i === blocks.length - 1}
+                        onclick={(e) => { e.stopPropagation(); moveBlock(block.id, 'down'); }}
+                      >▼</button>
+                      <button
+                        type="button"
+                        class="icon-btn icon-btn--danger"
+                        title="Eliminar"
+                        onclick={(e) => { e.stopPropagation(); confirmDeleteBlock = block; }}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6M10 11v6M14 11v6M9 6V4h6v2"/></svg>
+                      </button>
+                    </div>
+                  </header>
+
+                  <div
+                    class="block-preview manuscript-block-content {block.blockType === 'CHAPTER_OPENING' ? '' : blockLayoutPreviewClassNames(block)}"
+                    class:block-preview--with-thumb={block.blockType === 'IMAGE' && parseImageBlockContent(block.contentJson).assetId}
+                    class:block-preview--co-wrap={block.blockType === 'CHAPTER_OPENING'}
+                  >
+                    {#if block.blockType === 'CHAPTER_OPENING'}
+                      {@const co = parseChapterOpeningContent(block.contentJson)}
+                      <div class="block-preview-co {chapterOpeningPreviewRootClassNames(co)}">
+                        {#if co.assetId}
+                          {@const ast = bookAssets.find(a => a.id === co.assetId)}
+                          {#if ast}
+                            <img
+                              class="block-preview-co__img"
+                              src={assetDisplayUrl(bookId, ast.storagePath)}
+                              alt=""
+                            />
+                          {:else}
+                            <div class="block-preview-co__ph">Asset no encontrado</div>
+                          {/if}
+                        {:else}
+                          <div class="block-preview-co__ph">Sin imagen</div>
+                        {/if}
+                        <div class="block-preview-co__text">
+                          {#if co.chapterLabel.trim()}
+                            <span class="block-preview-co__label">{co.chapterLabel}</span>
+                          {/if}
+                          {#if co.title.trim()}
+                            <span class="block-preview-co__title">{co.title}</span>
+                          {/if}
+                        </div>
+                      </div>
+                    {:else if block.blockType === 'IMAGE'}
+                      {@const ic = parseImageBlockContent(block.contentJson)}
+                      {#if ic.assetId}
+                        {@const ast = bookAssets.find(a => a.id === ic.assetId)}
                         {#if ast}
                           <img
-                            class="block-preview-co__img"
+                            class="block-preview-thumb"
                             src={assetDisplayUrl(bookId, ast.storagePath)}
                             alt=""
                           />
-                        {:else}
-                          <div class="block-preview-co__ph">Asset no encontrado</div>
                         {/if}
-                      {:else}
-                        <div class="block-preview-co__ph">Sin imagen</div>
-                      {/if}
-                      <div class="block-preview-co__text">
-                        {#if co.chapterLabel.trim()}
-                          <span class="block-preview-co__label">{co.chapterLabel}</span>
-                        {/if}
-                        {#if co.title.trim()}
-                          <span class="block-preview-co__title">{co.title}</span>
-                        {/if}
-                      </div>
-                    </div>
-                  {:else if block.blockType === 'IMAGE'}
-                    {@const ic = parseImageBlockContent(block.contentJson)}
-                    {#if ic.assetId}
-                      {@const ast = bookAssets.find(a => a.id === ic.assetId)}
-                      {#if ast}
-                        <img
-                          class="block-preview-thumb"
-                          src={assetDisplayUrl(bookId, ast.storagePath)}
-                          alt=""
-                        />
                       {/if}
                     {/if}
-                  {/if}
-                  {#if block.blockType !== 'CHAPTER_OPENING'}
-                    <span class="block-preview-text" class:block-preview-text--muted={blockPreviewIsMuted(block)}>
-                      {blockContentPreview(block)}
-                    </span>
-                  {/if}
-                </div>
-
-                <div class="block-actions">
-                  <button
-                    type="button"
-                    class="text-btn text-btn--compact"
-                    title="Insertar debajo con el tipo elegido en Insertar (o el predeterminado)"
-                    disabled={addingBlock}
-                    onclick={(e) => { e.stopPropagation(); addBlockBelow(block.id); }}
-                  >+ debajo</button>
-                  <button
-                    type="button"
-                    class="arrow-btn"
-                    title="Subir"
-                    disabled={i === 0}
-                    onclick={(e) => { e.stopPropagation(); moveBlock(block.id, 'up'); }}
-                  >▲</button>
-                  <button
-                    type="button"
-                    class="arrow-btn"
-                    title="Bajar"
-                    disabled={i === blocks.length - 1}
-                    onclick={(e) => { e.stopPropagation(); moveBlock(block.id, 'down'); }}
-                  >▼</button>
-                  <button
-                    type="button"
-                    class="icon-btn icon-btn--danger"
-                    title="Eliminar"
-                    onclick={(e) => { e.stopPropagation(); confirmDeleteBlock = block; }}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6M10 11v6M14 11v6M9 6V4h6v2"/></svg>
-                  </button>
-                </div>
-              </li>
-            {/each}
-          </ul>
+                    {#if block.blockType !== 'CHAPTER_OPENING'}
+                      <span class="block-preview-text" class:block-preview-text--muted={blockPreviewIsMuted(block)}>
+                        {blockContentPreview(block)}
+                      </span>
+                    {/if}
+                  </div>
+                </section>
+              {/each}
+            </article>
+          </div>
         {/if}
       </div>
     {/if}
@@ -2429,6 +2434,150 @@
     scrollbar-width: thin;
     scrollbar-color: rgba(255,255,255,0.08) transparent;
     padding: 8px 0;
+  }
+
+  /* FASE A — canvas de escritura tipo manuscrito */
+  .manuscript-stage {
+    padding: 20px 0 28px;
+    min-height: 100%;
+  }
+  .manuscript-doc {
+    width: min(760px, calc(100% - 36px));
+    margin: 0 auto;
+    padding: 22px 26px 28px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: linear-gradient(180deg, #f7f5ef 0%, #f2efe7 100%);
+    color: #171717;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+  }
+  .manuscript-insert-row {
+    display: flex;
+    justify-content: center;
+    margin: 2px 0 6px;
+  }
+  .manuscript-insert-btn {
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    border: 1px solid rgba(0, 0, 0, 0.16);
+    background: rgba(255, 255, 255, 0.85);
+    color: rgba(0, 0, 0, 0.55);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .manuscript-insert-btn:hover:not(:disabled) {
+    color: #1b3552;
+    border-color: rgba(27, 53, 82, 0.42);
+    background: #fff;
+  }
+  .manuscript-insert-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .manuscript-block.block-item {
+    display: block;
+    padding: 8px 8px 10px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background: transparent;
+    cursor: text;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .manuscript-block.block-item:hover {
+    background: rgba(40, 66, 97, 0.05);
+    border-color: rgba(40, 66, 97, 0.16);
+  }
+  .manuscript-block.block-item.block-item--active {
+    background: rgba(53, 99, 153, 0.09) !important;
+    border-color: rgba(53, 99, 153, 0.3) !important;
+  }
+  .manuscript-block-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    opacity: 0.72;
+  }
+  .manuscript-block-content.block-preview {
+    max-width: 100%;
+  }
+  .manuscript-doc .block-idx {
+    width: auto;
+    min-width: 24px;
+    text-align: left;
+    color: rgba(0, 0, 0, 0.36);
+  }
+  .manuscript-doc .block-type-chip {
+    width: auto;
+    gap: 5px;
+  }
+  .manuscript-doc .block-chip-icon {
+    color: rgba(0, 0, 0, 0.38);
+  }
+  .manuscript-doc .block-chip-label {
+    color: rgba(0, 0, 0, 0.5);
+    letter-spacing: 0.05em;
+  }
+  .manuscript-doc .block-item--active .block-chip-label,
+  .manuscript-doc .block-item--active .block-chip-icon {
+    color: #285184;
+  }
+  .manuscript-doc .block-actions {
+    margin-left: auto;
+    opacity: 0;
+  }
+  .manuscript-doc .block-item:hover .block-actions,
+  .manuscript-doc .block-item--active .block-actions {
+    opacity: 1;
+  }
+  .manuscript-doc .block-preview-text {
+    white-space: pre-wrap;
+    overflow: visible;
+    text-overflow: clip;
+    display: block;
+    color: #1b1b1b;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 17px;
+    line-height: 1.6;
+    letter-spacing: 0.002em;
+  }
+  .manuscript-doc .block-preview--em-muted .block-preview-text {
+    opacity: 0.72;
+  }
+  .manuscript-doc .block-preview--em-strong .block-preview-text {
+    color: #171717;
+    font-weight: 600;
+  }
+  .manuscript-doc .block-preview--var-rights .block-preview-text {
+    font-size: 15px;
+    opacity: 0.7;
+  }
+  .manuscript-doc .block-preview--var-dedication .block-preview-text {
+    font-style: italic;
+  }
+  .manuscript-doc .block-preview--ta-center .block-preview-text {
+    text-align: center;
+  }
+  .manuscript-doc .block-preview--ta-right .block-preview-text {
+    text-align: right;
+  }
+  .manuscript-doc .block-preview--ta-justify .block-preview-text {
+    text-align: justify;
+  }
+  .manuscript-doc .block-preview-thumb {
+    width: min(180px, 38%);
+    height: auto;
+    aspect-ratio: 4 / 3;
+    border-radius: 8px;
+  }
+  .manuscript-doc .block-preview-co {
+    max-height: 180px;
+    border-radius: 8px;
   }
 
   .quick-type-select {
