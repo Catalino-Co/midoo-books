@@ -4,12 +4,14 @@
  */
 
 import type { SectionType } from '$lib/core/domain/section';
+import type { BlockType } from '$lib/core/domain/block';
 import {
   parseMarkdownToBlockDrafts,
   validateMarkdownForImport,
   type MarkdownBlockDraft,
 } from './markdown-to-blocks';
 import { inferSectionTypeFromTitle } from './section-title-heuristic';
+import { blockTypeLabel } from './block-type-catalog';
 
 /** Línea de título de sección: un solo `#` ATX, sin duplicar el título como bloque H1. */
 const TOP_LEVEL_H1 = /^#\s+(?!#)\s*(.*)$/;
@@ -31,6 +33,10 @@ export interface BookMarkdownImportPreview {
   sectionCount: number;
   totalBlocks:  number;
   sections:     BookMarkdownImportPreviewSectionRow[];
+  /** Tipos de bloque agregados en todo el manuscrito. */
+  byType: Partial<Record<BlockType, number>>;
+  /** Resumen legible para la cabecera del preview. */
+  summaryLine: string;
 }
 
 /**
@@ -116,6 +122,30 @@ export function parseMarkdownBookToSectionDrafts(source: string): MarkdownBookSe
   });
 }
 
+function aggregateBlockTypes(drafts: MarkdownBookSectionDraft[]): Partial<Record<BlockType, number>> {
+  const byType: Partial<Record<BlockType, number>> = {};
+  for (const d of drafts) {
+    for (const b of d.blockDrafts) {
+      byType[b.blockType] = (byType[b.blockType] ?? 0) + 1;
+    }
+  }
+  return byType;
+}
+
+function buildBookSummaryLine(
+  sectionCount: number,
+  totalBlocks: number,
+  byType: Partial<Record<BlockType, number>>,
+): string {
+  const parts = [`${sectionCount} sección(es)`, `${totalBlocks} bloque(s)`];
+  const ranked = Object.entries(byType)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([ty, n]) => `${n}× ${blockTypeLabel(ty as BlockType)}`);
+  if (ranked.length) parts.push(ranked.join(', '));
+  return parts.join(' · ');
+}
+
 export function buildMarkdownBookImportPreview(
   drafts: MarkdownBookSectionDraft[],
 ): BookMarkdownImportPreview {
@@ -125,9 +155,13 @@ export function buildMarkdownBookImportPreview(
     blockCount:  d.blockDrafts.length,
   }));
   const totalBlocks = drafts.reduce((n, d) => n + d.blockDrafts.length, 0);
+  const byType = aggregateBlockTypes(drafts);
+  const summaryLine = buildBookSummaryLine(drafts.length, totalBlocks, byType);
   return {
     sectionCount: drafts.length,
     totalBlocks,
     sections,
+    byType,
+    summaryLine,
   };
 }

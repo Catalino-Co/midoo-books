@@ -6,7 +6,8 @@
     getBook, updateBook, deleteBook,
     statusLabel, statusColor, formatDate,
   } from '$lib/services/books.service';
-  import BookMarkdownImportModal from '$lib/components/BookMarkdownImportModal.svelte';
+  import MarkdownImportUnifiedModal from '$lib/components/MarkdownImportUnifiedModal.svelte';
+  import type { MarkdownBookImportMode } from '$lib/services/content.service';
   import type { BookProject, BookStatus } from '$lib/core/domain/index';
 
   // ── Estado ────────────────────────────────────────────────────────────────
@@ -111,11 +112,16 @@
     if (book) syncFormToBook(book);
   }
 
-  function onBookMarkdownImported() {
-    bookImportNotice = 'Manuscrito importado. Puedes revisar la estructura en Contenido.';
+  function onOverviewMarkdownBookImported(detail: {
+    sectionCount: number;
+    blockCount: number;
+    mode: MarkdownBookImportMode;
+  }) {
+    const extra = detail.mode === 'replace' ? ' Se reemplazó el índice de secciones.' : '';
+    bookImportNotice = `Importación lista: ${detail.sectionCount} sección(es), ${detail.blockCount} bloque(s).${extra} Revisa en Contenido.`;
     setTimeout(() => {
       bookImportNotice = null;
-    }, 5000);
+    }, 7000);
   }
 
   // ── Eliminar ──────────────────────────────────────────────────────────────
@@ -138,7 +144,12 @@
 </svelte:head>
 
 <!-- ── Confirmación de borrado ─────────────────────────────────────────────── -->
-<BookMarkdownImportModal bind:open={showBookMarkdownImport} {bookId} onImported={onBookMarkdownImported} />
+<MarkdownImportUnifiedModal
+  bind:open={showBookMarkdownImport}
+  {bookId}
+  sectionContext={null}
+  onImportedBook={onOverviewMarkdownBookImported}
+/>
 
 {#if confirmDelete}
   <div class="overlay" role="dialog" aria-modal="true">
@@ -325,16 +336,16 @@
         <section class="form-section">
           <h2 class="form-section-title">Manuscrito</h2>
           <p class="import-manuscript-lead">
-            Importa un Markdown estructurado con <code class="import-code"># Título de sección</code> por cada parte
-            del libro. El contenido bajo cada <code class="import-code">#</code> se convierte en bloques (mismas reglas
-            que la importación por sección). Puedes añadir al final o reemplazar todas las secciones existentes.
+            Mismo flujo que en <strong>Contenido → Importar Markdown</strong>: puedes pegar o cargar un .md; en Descripción
+            solo está disponible la importación a <strong>todo el libro</strong> (cada <code class="import-code">#</code> crea una sección).
+            Para añadir bloques solo a una sección, abre Contenido y elige la pestaña «Sección actual».
           </p>
           <button
             type="button"
             class="btn btn--ghost btn--sm"
             onclick={() => (showBookMarkdownImport = true)}
           >
-            Importar manuscrito Markdown
+            Importar Markdown
           </button>
         </section>
 

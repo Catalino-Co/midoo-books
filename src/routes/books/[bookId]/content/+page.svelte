@@ -17,6 +17,7 @@
     duplicateSection,
     listBlocks,   updateBlock,   deleteBlock,   moveBlockInList,
     createBlockInSection,
+    createBlockFirstInSection,
     sectionTypeLabel,
     getSectionCreationDefaults,
     getSectionEditorialPreset,
@@ -44,12 +45,6 @@
     textAlignLabel,
     widthModeLabel,
     emphasisLabel,
-    importMarkdownBlocksToSection,
-    parseMarkdownToBlockDrafts,
-    buildMarkdownImportPreview,
-    validateMarkdownForImport,
-    type MarkdownImportMode,
-    type MarkdownImportPreview,
     type BlockTextAlign,
     type BlockWidthMode,
     type BlockEmphasis,
@@ -68,6 +63,8 @@
     type ChapterOpeningTextPosition,
     type ChapterOpeningTextAlign,
     type ChapterOpeningTextColorMode,
+    type MarkdownBookImportMode,
+    type MarkdownImportMode,
   } from '$lib/services/content.service';
   import {
     listAssets,
@@ -87,10 +84,11 @@
     findPreviewLocationForSelection,
   } from '$lib/services/preview-layout.service';
   import SectionTypeSelect from '$lib/components/SectionTypeSelect.svelte';
-  import BookMarkdownImportModal from '$lib/components/BookMarkdownImportModal.svelte';
+  import MarkdownImportUnifiedModal from '$lib/components/MarkdownImportUnifiedModal.svelte';
   import type {
     DocumentSection, SectionType,
     DocumentBlock,   BlockType, BlockStyleVariant,
+    CreateBlockInput,
     Asset,
     LayoutSettings,
   } from '$lib/core/domain/index';
@@ -128,17 +126,68 @@
   let addingBlock            = $state(false);
   let showInsertBlockModal   = $state(false);
   let insertBlockError       = $state<string | null>(null);
+  let showQuickInsertMenu    = $state(false);
 
-  // Importación Markdown por sección (PARTE 6A)
-  let showMdImportModal      = $state(false);
-  let mdImportText           = $state('');
-  let mdImportMode           = $state<MarkdownImportMode>('append');
-  let mdImportError          = $state<string | null>(null);
-  let mdImporting            = $state(false);
-  let mdFileInput            = $state<HTMLInputElement | null>(null);
+  /** Comando / en textarea del inspector: menú de inserción de bloque siguiente */
+  let slashMenuOpen          = $state(false);
+  let slashMenuFilter        = $state('');
+  let slashMenuLineStart     = $state(0);
+  let slashMenuCaretEnd      = $state(0);
+  let slashMenuSelectedIndex = $state(0);
 
-  // Importación manuscrito Markdown — libro completo (PARTE 6B)
-  let showBookMarkdownImport = $state(false);
+  const SLASH_INSERT_TYPES: BlockType[] = [
+    'PARAGRAPH',
+    'HEADING_1',
+    'HEADING_2',
+    'QUOTE',
+    'CENTERED_PHRASE',
+    'SEPARATOR',
+    'PAGE_BREAK',
+    'IMAGE',
+    'CHAPTER_OPENING',
+  ];
+
+  const SLASH_ALIASES: Partial<Record<BlockType, string[]>> = {
+    PARAGRAPH:       ['p', 'parrafo', 'paragraph', 'texto'],
+    HEADING_1:       ['h1', 'titulo', 'title'],
+    HEADING_2:       ['h2', 'subtitulo', 'subtitle'],
+    QUOTE:           ['cita', 'quote', 'blockquote'],
+    CENTERED_PHRASE: ['centrado', 'centro', 'epigrafe', 'epígrafe', 'dedicatoria'],
+    SEPARATOR:       ['separador', 'linea', 'línea', 'hr', '---'],
+    PAGE_BREAK:      ['salto', 'page', 'pagina', 'página'],
+    IMAGE:           ['imagen', 'img', 'foto', 'figure'],
+    CHAPTER_OPENING: ['apertura', 'co'],
+  };
+
+  function stripAccents(s: string): string {
+    return s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  }
+
+  let slashFilteredTypes = $derived.by(() => {
+    const f = stripAccents(slashMenuFilter);
+    if (!f) return SLASH_INSERT_TYPES;
+    return SLASH_INSERT_TYPES.filter(t => {
+      const label = stripAccents(blockTypeLabel(t));
+      if (label.includes(f)) return true;
+      const aliases = SLASH_ALIASES[t];
+      return aliases?.some(a => {
+        const aa = stripAccents(a);
+        return aa.includes(f) || f.startsWith(aa) || aa.startsWith(f);
+      }) ?? false;
+    });
+  });
+
+  $effect(() => {
+    if (!slashMenuOpen) return;
+    const n = slashFilteredTypes.length;
+    if (slashMenuSelectedIndex >= n) {
+      slashMenuSelectedIndex = Math.max(0, n - 1);
+    }
+  });
+
+  // Importación Markdown unificada (sección + libro)
+  let showMarkdownImportModal = $state(false);
+  let markdownImportNotice    = $state<string | null>(null);
 
   // Confirmación de borrado
   let confirmDeleteSection   = $state<DocumentSection | null>(null);
@@ -165,6 +214,16 @@
     selectedBlock && selectedSection && bookLayoutSettings
       ? resolveEffectiveBookStyleInfoForBlock(bookLayoutSettings, selectedSection, selectedBlock)
       : null
+  );
+
+  let mdSectionContext = $derived(
+    selectedSectionId && selectedSection
+      ? {
+          sectionId: selectedSectionId,
+          title:     selectedSection.title || sectionTypeLabel(selectedSection.sectionType),
+          blockCount: blocks.length,
+        }
+      : null,
   );
 
   // Inspector: ¿qué mostrar?
@@ -343,6 +402,7 @@
   // ── Selección de sección ──────────────────────────────────────────────────
   async function selectSection(id: string) {
     if (selectedSectionId === id) return;
+    closeSlashMenu();
     await flushInspectorIfNeeded();
     selectedSectionId = id;
     selectedBlockId   = null;
@@ -365,6 +425,7 @@
   // ── Selección de bloque ───────────────────────────────────────────────────
   async function selectBlock(id: string) {
     if (selectedBlockId === id) return;
+    closeSlashMenu();
     await flushInspectorIfNeeded();
     selectedBlockId = id;
     const block = blocks.find(b => b.id === id);
@@ -373,6 +434,7 @@
   }
 
   async function clearBlockSelection() {
+    closeSlashMenu();
     await flushInspectorIfNeeded();
     selectedBlockId = null;
     syncSectionToInspector();
@@ -734,8 +796,222 @@
     }
   }
 
+  async function insertGapAtIndex(i: number) {
+    if (!selectedSectionId || addingBlock) return;
+    const sorted = [...blocks].sort((a, b) => a.orderIndex - b.orderIndex);
+    addingBlock = true;
+    globalError = null;
+    const openingHint = coQuickTypeHint;
+    if (openingHint) {
+      globalError = openingHint;
+      setTimeout(() => {
+        if (globalError === openingHint) globalError = null;
+      }, 4500);
+    }
+    try {
+      const payload: Omit<CreateBlockInput, 'sectionId'> = {
+        blockType:   quickBlockType,
+        contentText: '',
+      };
+      const created = i === 0
+        ? await createBlockFirstInSection(selectedSectionId, blocks, payload)
+        : await createBlockInSection(selectedSectionId, blocks, sorted[i - 1]!.id, payload);
+      blocks = await listBlocks(selectedSectionId);
+      await selectBlock(created.id);
+    } catch (e) {
+      globalError = e instanceof Error ? e.message : String(e);
+    } finally {
+      addingBlock = false;
+    }
+  }
+
+  function blockCreatePayloadForType(type: BlockType): Omit<CreateBlockInput, 'sectionId'> {
+    if (type === 'IMAGE') {
+      return {
+        blockType:   type,
+        contentText: '',
+        contentJson: serializeImageBlockContent({
+          assetId: null,
+          altText: '',
+          caption: '',
+          fillPage: false,
+        }),
+      };
+    }
+    if (type === 'CHAPTER_OPENING') {
+      return {
+        blockType:   type,
+        contentText: '',
+        contentJson: serializeChapterOpeningContent({ ...EMPTY_CHAPTER_OPENING_CONTENT }),
+      };
+    }
+    return { blockType: type, contentText: '' };
+  }
+
+  function closeSlashMenu() {
+    slashMenuOpen = false;
+    slashMenuFilter = '';
+    slashMenuLineStart = 0;
+    slashMenuCaretEnd = 0;
+    slashMenuSelectedIndex = 0;
+  }
+
+  function syncSlashMenuFromTextarea(el: HTMLTextAreaElement) {
+    if (inspectorMode !== 'block' || !selectedBlockId || !blockHasEditableText(inspSurface)) {
+      closeSlashMenu();
+      return;
+    }
+    const v = el.value;
+    const caret = el.selectionStart;
+    const lineStart = v.lastIndexOf('\n', caret - 1) + 1;
+    const lineToCaret = v.slice(lineStart, caret);
+    const m = /^\/([\p{L}\p{N}_\-]*)$/u.exec(lineToCaret);
+    if (m) {
+      slashMenuOpen = true;
+      slashMenuFilter = m[1] ?? '';
+      slashMenuLineStart = lineStart;
+      slashMenuCaretEnd = caret;
+    } else {
+      closeSlashMenu();
+    }
+  }
+
+  function onInspectorContentInput(e: Event) {
+    markInspectorDirty();
+    const el = e.target;
+    if (el instanceof HTMLTextAreaElement) syncSlashMenuFromTextarea(el);
+  }
+
+  function onInspectorContentSelect(e: Event) {
+    const el = e.target;
+    if (el instanceof HTMLTextAreaElement) syncSlashMenuFromTextarea(el);
+  }
+
+  function onInspectorContentKeydown(e: KeyboardEvent) {
+    if (!slashMenuOpen || slashFilteredTypes.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      slashMenuSelectedIndex = Math.min(
+        slashFilteredTypes.length - 1,
+        slashMenuSelectedIndex + 1,
+      );
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      slashMenuSelectedIndex = Math.max(0, slashMenuSelectedIndex - 1);
+    } else if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      void insertBlockFromSlash(slashFilteredTypes[slashMenuSelectedIndex]!);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeSlashMenu();
+    }
+  }
+
+  async function insertBlockFromSlash(type: BlockType) {
+    if (!selectedSectionId || !selectedBlockId || addingBlock) return;
+    const lineStart = slashMenuLineStart;
+    const lineEnd = slashMenuCaretEnd;
+    closeSlashMenu();
+    addingBlock = true;
+    globalError = null;
+    const openingHint
+      = type === 'CHAPTER_OPENING' && selectedSection?.sectionType !== 'CHAPTER'
+        ? 'Sugerencia: «Apertura de capítulo» encaja mejor en secciones tipo Capítulo.'
+        : null;
+    if (openingHint) {
+      globalError = openingHint;
+      setTimeout(() => {
+        if (globalError === openingHint) globalError = null;
+      }, 4500);
+    }
+    try {
+      const before = insp_bContentText.slice(0, lineStart);
+      const after = insp_bContentText.slice(lineEnd);
+      insp_bContentText = before + after;
+      markInspectorDirty();
+      await saveBlock();
+      const payload = blockCreatePayloadForType(type);
+      const created = await createBlockInSection(selectedSectionId, blocks, selectedBlockId, payload);
+      blocks = await listBlocks(selectedSectionId);
+      await selectBlock(created.id);
+    } catch (e) {
+      globalError = e instanceof Error ? e.message : String(e);
+    } finally {
+      addingBlock = false;
+    }
+  }
+
+  async function insertTypedBlockQuick(type: BlockType) {
+    if (!selectedSectionId || addingBlock) return;
+    addingBlock = true;
+    globalError = null;
+    showQuickInsertMenu = false;
+    const openingHint
+      = type === 'CHAPTER_OPENING' && selectedSection?.sectionType !== 'CHAPTER'
+        ? 'Sugerencia: «Apertura de capítulo» encaja mejor en secciones tipo Capítulo.'
+        : null;
+    if (openingHint) {
+      globalError = openingHint;
+      setTimeout(() => {
+        if (globalError === openingHint) globalError = null;
+      }, 4500);
+    }
+    try {
+      const payload = blockCreatePayloadForType(type);
+      const afterId = selectedBlockId;
+      const created = afterId
+        ? await createBlockInSection(selectedSectionId, blocks, afterId, payload)
+        : await createBlockInSection(selectedSectionId, blocks, null, payload);
+      blocks = await listBlocks(selectedSectionId);
+      await selectBlock(created.id);
+    } catch (e) {
+      globalError = e instanceof Error ? e.message : String(e);
+    } finally {
+      addingBlock = false;
+    }
+  }
+
+  function applyInspectorBlockType(next: BlockType) {
+    insp_bType = next;
+    const L = defaultBlockLayout(insp_bType, insp_bStyleVariant);
+    insp_bTextAlign = L.textAlign;
+    insp_bWidthMode = L.widthMode;
+    insp_bEmphasis  = L.emphasis;
+    if (insp_bType === 'IMAGE') {
+      insp_bImageAssetId = '';
+      insp_bImageAlt     = '';
+      insp_bImageCaption = '';
+    } else {
+      insp_bImageAssetId = '';
+      insp_bImageAlt     = '';
+      insp_bImageCaption = '';
+    }
+    if (insp_bType === 'CHAPTER_OPENING') {
+      if (
+        selectedBlock?.blockType === 'CHAPTER_OPENING'
+        && selectedBlock.id === selectedBlockId
+      ) {
+        const co = parseChapterOpeningContent(selectedBlock.contentJson);
+        insp_bCoLabel         = co.chapterLabel;
+        insp_bCoTitle         = co.title;
+        insp_bCoAssetId       = co.assetId ?? '';
+        insp_bCoTextPosition  = co.textPosition;
+        insp_bCoTextAlign     = co.textAlign;
+        insp_bCoOverlay       = co.overlay;
+        insp_bCoTextColorMode = co.textColorMode;
+      } else {
+        resetChapterOpeningInspector();
+      }
+    } else {
+      resetChapterOpeningInspector();
+    }
+    markInspectorDirty();
+    void onInspectorBlur();
+  }
+
   function openInsertBlockModal() {
     insertBlockError = null;
+    showQuickInsertMenu = false;
     showInsertBlockModal = true;
   }
 
@@ -783,45 +1059,16 @@
     ),
   );
 
-  let mdImportPreview = $derived.by((): MarkdownImportPreview | null => {
-    if (!mdImportText.trim()) return null;
-    const drafts = parseMarkdownToBlockDrafts(mdImportText);
-    if (drafts.length === 0) return null;
-    return buildMarkdownImportPreview(drafts);
-  });
-
-  /** Etiqueta de tipo de bloque para claves devueltas por `Object.entries`. */
-  function previewBlockTypeLabel(t: string): string {
-    return blockTypeLabel(t as BlockType);
+  function onContentGlobalKeydown(e: KeyboardEvent) {
+    if (e.key !== 'Escape') return;
+    if (showQuickInsertMenu) {
+      showQuickInsertMenu = false;
+      e.preventDefault();
+    }
   }
 
-  function openMdImportModal() {
-    mdImportError = null;
-    mdImportText = '';
-    mdImportMode = 'append';
-    showMdImportModal = true;
-  }
-
-  function closeMdImportModal() {
-    if (mdImporting) return;
-    showMdImportModal = false;
-    mdImportError = null;
-  }
-
-  function onMdFileChange(e: Event) {
-    const input = e.target as HTMLInputElement;
-    const f = input.files?.[0];
-    if (!f) return;
-    const r = new FileReader();
-    r.onload = () => {
-      mdImportText = String(r.result ?? '');
-      mdImportError = null;
-    };
-    r.onerror = () => {
-      mdImportError = 'No se pudo leer el archivo.';
-    };
-    r.readAsText(f);
-    input.value = '';
+  function openMarkdownImportModal() {
+    showMarkdownImportModal = true;
   }
 
   async function onBookMarkdownImported() {
@@ -837,50 +1084,41 @@
     }
   }
 
-  async function confirmMdImport() {
-    if (!selectedSectionId || mdImporting) return;
-    const v = validateMarkdownForImport(mdImportText);
-    if (!v.ok) {
-      mdImportError = v.message;
-      return;
-    }
-    const drafts = parseMarkdownToBlockDrafts(mdImportText);
-    if (drafts.length === 0) {
-      mdImportError =
-        'No se detectaron bloques. Usa párrafos, # título, ## subtítulo, > cita, ---, [[PAGE_BREAK]] o ![alt](ruta).';
-      return;
-    }
-    if (mdImportMode === 'replace' && blocks.length > 0) {
-      const ok = confirm(
-        `¿Reemplazar los ${blocks.length} bloque(s) actuales por ${drafts.length} importado(s)? Esta acción no se puede deshacer.`,
-      );
-      if (!ok) return;
-    }
+  async function onUnifiedBookImported(detail: {
+    sectionCount: number;
+    blockCount: number;
+    mode: MarkdownBookImportMode;
+  }) {
+    const tail = detail.mode === 'replace' ? ' Se reemplazó el índice de secciones.' : ' Se añadieron al final.';
+    markdownImportNotice = `Importación del libro: ${detail.sectionCount} sección(es), ${detail.blockCount} bloque(s).${tail}`;
+    setTimeout(() => {
+      markdownImportNotice = null;
+    }, 7000);
+    await onBookMarkdownImported();
+  }
+
+  async function onUnifiedSectionImported(detail: {
+    blockCount: number;
+    mode: MarkdownImportMode;
+  }) {
     await flushInspectorIfNeeded();
-    mdImporting = true;
-    mdImportError = null;
-    globalError = null;
-    try {
-      blocks = await importMarkdownBlocksToSection(
-        selectedSectionId,
-        mdImportText,
-        mdImportMode,
-        blocks,
-      );
-      showMdImportModal = false;
-      selectedBlockId = null;
-      syncSectionToInspector();
-    } catch (e) {
-      mdImportError = e instanceof Error ? e.message : String(e);
-    } finally {
-      mdImporting = false;
+    markdownImportNotice = `Importación en sección: ${detail.blockCount} bloque(s)${detail.mode === 'replace' ? ' (reemplazo)' : ' (al final)'}.`;
+    setTimeout(() => {
+      markdownImportNotice = null;
+    }, 5500);
+    if (selectedSectionId) {
+      blocks = await listBlocks(selectedSectionId);
     }
+    selectedBlockId = null;
+    syncSectionToInspector();
   }
 </script>
 
 <svelte:head>
   <title>Contenido — MIDOO BOOKS</title>
 </svelte:head>
+
+<svelte:window onkeydown={onContentGlobalKeydown} />
 
 <!-- ── Modales ────────────────────────────────────────────────────────────── -->
 
@@ -1056,116 +1294,13 @@
   </div>
 {/if}
 
-{#if showMdImportModal}
-  <div class="overlay" role="dialog" aria-modal="true" aria-labelledby="md-import-title">
-    <div class="modal modal--md-import">
-      <div class="modal-header">
-        <h3 id="md-import-title" class="modal-title">Importar Markdown</h3>
-        <button type="button" class="modal-close" onclick={closeMdImportModal} disabled={mdImporting}>✕</button>
-      </div>
-      <div class="modal-form modal-form--flush">
-        <p class="modal-hint modal-hint--insert">
-          Solo afecta a la sección actual. No se crean secciones nuevas desde <code class="md-code">#</code>.
-          Reglas: <code class="md-code">#</code> / <code class="md-code">##</code>, párrafos (línea en blanco), <code class="md-code">&gt;</code> cita,
-          <code class="md-code">---</code>, <code class="md-code">[[PAGE_BREAK]]</code>, <code class="md-code">![alt](ruta)</code>.
-        </p>
-
-        {#if mdImportError}
-          <div class="alert alert--error">{mdImportError}</div>
-        {/if}
-
-        <div class="form-field">
-          <label class="form-label" for="md-paste">Pegar Markdown</label>
-          <textarea
-            id="md-paste"
-            class="form-textarea md-import-textarea"
-            bind:value={mdImportText}
-            disabled={mdImporting}
-            placeholder="# Capítulo en esta sección&#10;&#10;Párrafo uno.&#10;&#10;## Subtítulo&#10;&#10;> Una cita&#10;&#10;---&#10;&#10;[[PAGE_BREAK]]"
-            rows={10}
-          ></textarea>
-        </div>
-
-        <div class="form-field form-field--row-md">
-          <input
-            bind:this={mdFileInput}
-            type="file"
-            accept=".md,.markdown,text/markdown,text/plain"
-            class="sr-only"
-            onchange={onMdFileChange}
-          />
-          <button
-            type="button"
-            class="btn btn--ghost btn--sm"
-            disabled={mdImporting}
-            onclick={() => mdFileInput?.click()}
-          >
-            Cargar archivo .md
-          </button>
-        </div>
-
-        <div class="form-field">
-          <span class="form-label">Inserción</span>
-          <div class="md-import-mode">
-            <label class="md-radio">
-              <input type="radio" name="md-mode" value="append" bind:group={mdImportMode} disabled={mdImporting} />
-              <span>Agregar al final</span>
-            </label>
-            <label class="md-radio">
-              <input type="radio" name="md-mode" value="replace" bind:group={mdImportMode} disabled={mdImporting} />
-              <span>Reemplazar bloques actuales</span>
-            </label>
-          </div>
-        </div>
-
-        {#if mdImportPreview}
-          <div class="md-import-preview">
-            <div class="md-import-preview-title">Vista previa</div>
-            <p class="md-import-preview-meta">
-              <strong>{mdImportPreview.blockCount}</strong> bloque(s) ·
-              {#each Object.entries(mdImportPreview.byType) as [t, n], j (t)}
-                {j > 0 ? ' · ' : ''}{previewBlockTypeLabel(t)}: {n}
-              {/each}
-            </p>
-            <ul class="md-import-preview-list">
-              {#each mdImportPreview.samples as s, idx (idx)}
-                <li>
-                  <span class="md-import-preview-type">{blockTypeLabel(s.type)}</span>
-                  <span class="md-import-preview-excerpt">{s.excerpt}</span>
-                </li>
-              {/each}
-            </ul>
-            {#if mdImportPreview.blockCount > mdImportPreview.samples.length}
-              <p class="md-import-preview-more">… y {mdImportPreview.blockCount - mdImportPreview.samples.length} más</p>
-            {/if}
-          </div>
-        {:else if mdImportText.trim()}
-          <p class="modal-hint">No se detectaron bloques con el contenido actual.</p>
-        {/if}
-
-        <div class="modal-actions modal-actions--stack">
-          <button
-            type="button"
-            class="btn btn--primary btn--full"
-            disabled={mdImporting || !mdImportPreview}
-            onclick={() => confirmMdImport()}
-          >
-            {#if mdImporting}
-              <span class="spinner-sm"></span> Importando…
-            {:else}
-              Confirmar importación
-            {/if}
-          </button>
-          <button type="button" class="btn btn--ghost btn--full" disabled={mdImporting} onclick={closeMdImportModal}>
-            Cancelar
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-{/if}
-
-<BookMarkdownImportModal bind:open={showBookMarkdownImport} bookId={bookId} onImported={onBookMarkdownImported} />
+<MarkdownImportUnifiedModal
+  bind:open={showMarkdownImportModal}
+  bookId={bookId}
+  sectionContext={mdSectionContext}
+  onImportedBook={onUnifiedBookImported}
+  onImportedSection={onUnifiedSectionImported}
+/>
 
 <!-- ── Página principal ─────────────────────────────────────────────────── -->
 <div class="content-page">
@@ -1175,6 +1310,12 @@
     <div class="global-error">
       <strong>Error:</strong> {globalError}
       <button class="alert-close" onclick={() => (globalError = null)}>✕</button>
+    </div>
+  {/if}
+  {#if markdownImportNotice}
+    <div class="global-notice global-notice--ok">
+      {markdownImportNotice}
+      <button type="button" class="alert-close" onclick={() => (markdownImportNotice = null)}>✕</button>
     </div>
   {/if}
 
@@ -1194,13 +1335,6 @@
         </button>
         <button
           type="button"
-          class="btn btn--sm btn--ghost"
-          title="Importar manuscrito Markdown (varias secciones)"
-          onclick={() => (showBookMarkdownImport = true)}
-        >
-          MD libro
-        </button>
-        <button
           class="icon-btn icon-btn--accent"
           title="Nueva sección"
           onclick={openNewSectionModal}
@@ -1223,47 +1357,51 @@
           </button>
         </div>
       {:else}
-        <ul class="section-list">
+        <ul class="section-list" aria-label="Secciones del libro">
           {#each sections as section, i (section.id)}
-            <!-- svelte-ignore a11y_click_events_have_key_events -->
-            <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-            <li
-              class="section-item"
-              class:section-item--active={selectedSectionId === section.id}
-              onclick={() => selectSection(section.id)}
-            >
+            <li class="section-row">
               <!-- Order arrows -->
               <div class="section-arrows">
                 <button
+                  type="button"
                   class="arrow-btn"
                   title="Subir"
                   disabled={i === 0}
-                  onclick={(e) => { e.stopPropagation(); moveSection(section.id, 'up'); }}
+                  onclick={() => moveSection(section.id, 'up')}
                 >▲</button>
                 <button
+                  type="button"
                   class="arrow-btn"
                   title="Bajar"
                   disabled={i === sections.length - 1}
-                  onclick={(e) => { e.stopPropagation(); moveSection(section.id, 'down'); }}
+                  onclick={() => moveSection(section.id, 'down')}
                 >▼</button>
               </div>
 
-              <!-- Info -->
-              <div class="section-info">
-                <span class="section-title-text">
-                  {section.title || sectionTypeLabel(section.sectionType)}
+              <button
+                type="button"
+                class="section-item-main"
+                class:section-item-main--active={selectedSectionId === section.id}
+                aria-current={selectedSectionId === section.id ? 'true' : undefined}
+                onclick={() => selectSection(section.id)}
+              >
+                <span class="section-info">
+                  <span class="section-title-text">
+                    {section.title || sectionTypeLabel(section.sectionType)}
+                  </span>
+                  {#if section.title.trim()}
+                    <span class="section-type-muted">{sectionTypeLabel(section.sectionType)}</span>
+                  {/if}
                 </span>
-                {#if section.title.trim()}
-                  <span class="section-type-muted">{sectionTypeLabel(section.sectionType)}</span>
-                {/if}
-              </div>
+              </button>
 
               <!-- Duplicar / eliminar -->
               <button
+                type="button"
                 class="icon-btn"
                 title="Duplicar sección"
                 disabled={duplicatingSectionId === section.id}
-                onclick={(e) => { e.stopPropagation(); onDuplicateSection(section); }}
+                onclick={() => onDuplicateSection(section)}
               >
                 {#if duplicatingSectionId === section.id}
                   <span class="spinner-sm spinner-sm--light"></span>
@@ -1272,9 +1410,10 @@
                 {/if}
               </button>
               <button
+                type="button"
                 class="icon-btn icon-btn--danger"
                 title="Eliminar sección"
-                onclick={(e) => { e.stopPropagation(); confirmDeleteSection = section; }}
+                onclick={() => (confirmDeleteSection = section)}
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6M10 11v6M14 11v6M9 6V4h6v2"/></svg>
               </button>
@@ -1319,12 +1458,42 @@
           <button
             type="button"
             class="btn btn--sm btn--ghost"
-            onclick={openMdImportModal}
+            onclick={openMarkdownImportModal}
             disabled={loadingBlocks}
-            title="Importar Markdown en esta sección"
+            title="Importar Markdown (sección actual o libro completo)"
           >
             Importar Markdown
           </button>
+          <div class="blocks-quick-insert-wrap">
+            <button
+              type="button"
+              class="btn btn--sm btn--ghost blocks-slash-btn"
+              onclick={() => { showQuickInsertMenu = !showQuickInsertMenu; }}
+              disabled={loadingBlocks}
+              title="Insertar bloque (atajo: escribe / en el inspector)"
+              aria-expanded={showQuickInsertMenu}
+              aria-haspopup="true"
+            >/ Tipos</button>
+            {#if showQuickInsertMenu}
+              <div class="quick-insert-pop" role="menu" aria-label="Tipos de bloque">
+                {#each SLASH_INSERT_TYPES as t (t)}
+                  <button
+                    type="button"
+                    class="quick-insert-row"
+                    role="menuitem"
+                    disabled={addingBlock}
+                    onmousedown={(e) => e.preventDefault()}
+                    onclick={() => void insertTypedBlockQuick(t)}
+                  >
+                    <svg class="quick-insert-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                      <path d={blockTypeIcon(t)}/>
+                    </svg>
+                    <span>{blockTypeLabel(t)}</span>
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
           <button
             type="button"
             class="btn btn--sm btn--primary"
@@ -1350,7 +1519,7 @@
               <path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
             </svg>
             <p class="empty-write-title">Empieza a escribir esta sección</p>
-            <p class="empty-write-hint">Añade un párrafo, un título o una cita; usa <strong>Importar Markdown</strong> o <strong>Insertar</strong> arriba. Reordena y refina cuando quieras.</p>
+            <p class="empty-write-hint">Añade un párrafo, un título o una cita; usa <strong>Importar Markdown</strong>, <strong>/ Tipos</strong> o <strong>Insertar</strong>. Con un bloque seleccionado, escribe <strong>/</strong> en el inspector para insertar el siguiente bloque.</p>
             <div class="empty-write-actions">
               <select class="quick-type-select quick-type-select--solo" bind:value={quickBlockType} disabled={addingBlock}>
                 {#each ALL_BLOCK_TYPES as t}
@@ -1373,17 +1542,25 @@
                   <button
                     type="button"
                     class="manuscript-insert-btn"
-                    title="Insertar bloque debajo"
+                    title="Insertar bloque aquí"
                     disabled={addingBlock}
-                    onclick={() => addBlockBelow(block.id)}
+                    onclick={() => insertGapAtIndex(i)}
                   >+</button>
                 </div>
-                <!-- svelte-ignore a11y_click_events_have_key_events -->
-                <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
                 <section
                   class="manuscript-block block-item"
                   class:block-item--active={selectedBlockId === block.id}
+                  role="button"
+                  tabindex="0"
+                  aria-label="Bloque {i + 1}, {blockTypeLabel(block.blockType)}. Elegir para editar."
+                  aria-current={selectedBlockId === block.id ? 'true' : undefined}
                   onclick={() => selectBlock(block.id)}
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      void selectBlock(block.id);
+                    }
+                  }}
                 >
                   <header class="manuscript-block-meta">
                     <span class="block-idx" title="Orden en la sección">#{i + 1}</span>
@@ -1605,48 +1782,25 @@
             ← Propiedades de la sección
           </button>
 
+          {#if blockHasEditableText(inspSurface)}
+            <div class="insp-context-bar" role="toolbar" aria-label="Formato rápido del bloque">
+              <button type="button" class="ctx-chip" class:ctx-chip--on={insp_bType === 'HEADING_1'} onclick={() => applyInspectorBlockType('HEADING_1')}>H1</button>
+              <button type="button" class="ctx-chip" class:ctx-chip--on={insp_bType === 'HEADING_2'} onclick={() => applyInspectorBlockType('HEADING_2')}>H2</button>
+              <button type="button" class="ctx-chip" class:ctx-chip--on={insp_bType === 'PARAGRAPH'} onclick={() => applyInspectorBlockType('PARAGRAPH')}>¶</button>
+              <button type="button" class="ctx-chip" class:ctx-chip--on={insp_bType === 'QUOTE'} onclick={() => applyInspectorBlockType('QUOTE')}>Cita</button>
+              <button type="button" class="ctx-chip" class:ctx-chip--on={insp_bType === 'CENTERED_PHRASE'} onclick={() => applyInspectorBlockType('CENTERED_PHRASE')}>Centro</button>
+              <button type="button" class="ctx-chip" class:ctx-chip--on={insp_bType === 'SEPARATOR'} onclick={() => applyInspectorBlockType('SEPARATOR')}>—</button>
+              <button type="button" class="ctx-chip" class:ctx-chip--on={insp_bType === 'PAGE_BREAK'} onclick={() => applyInspectorBlockType('PAGE_BREAK')}>Salto</button>
+            </div>
+          {/if}
+
           <div class="insp-field">
             <label class="insp-label" for="ib-type">Tipo de bloque</label>
             <select
               id="ib-type"
               class="insp-select"
               bind:value={insp_bType}
-              onchange={() => {
-                const L = defaultBlockLayout(insp_bType, insp_bStyleVariant);
-                insp_bTextAlign = L.textAlign;
-                insp_bWidthMode = L.widthMode;
-                insp_bEmphasis  = L.emphasis;
-                if (insp_bType === 'IMAGE') {
-                  insp_bImageAssetId = '';
-                  insp_bImageAlt     = '';
-                  insp_bImageCaption = '';
-                } else {
-                  insp_bImageAssetId = '';
-                  insp_bImageAlt     = '';
-                  insp_bImageCaption = '';
-                }
-                if (insp_bType === 'CHAPTER_OPENING') {
-                  if (
-                    selectedBlock?.blockType === 'CHAPTER_OPENING'
-                    && selectedBlock.id === selectedBlockId
-                  ) {
-                    const co = parseChapterOpeningContent(selectedBlock.contentJson);
-                    insp_bCoLabel         = co.chapterLabel;
-                    insp_bCoTitle         = co.title;
-                    insp_bCoAssetId       = co.assetId ?? '';
-                    insp_bCoTextPosition  = co.textPosition;
-                    insp_bCoTextAlign     = co.textAlign;
-                    insp_bCoOverlay       = co.overlay;
-                    insp_bCoTextColorMode = co.textColorMode;
-                  } else {
-                    resetChapterOpeningInspector();
-                  }
-                } else {
-                  resetChapterOpeningInspector();
-                }
-                markInspectorDirty();
-                onInspectorBlur();
-              }}
+              onchange={() => applyInspectorBlockType(insp_bType)}
             >
               {#each ALL_BLOCK_TYPES as t}
                 <option value={t}>{blockTypeLabel(t)}</option>
@@ -1690,48 +1844,120 @@
           {#if inspSurface === 'short'}
             <div class="insp-field">
               <label class="insp-label" for="ib-text">Texto</label>
-              <div class={inspEditorWrapClass}>
-                <textarea
-                  id="ib-text"
-                  class="insp-textarea insp-textarea--short"
-                  bind:value={insp_bContentText}
-                  oninput={markInspectorDirty}
-                  onblur={onInspectorBlur}
-                  rows={3}
-                  maxlength={2000}
-                  placeholder="Título o encabezado…"
-                ></textarea>
+              <div class="insp-slash-host">
+                {#if slashMenuOpen && blockHasEditableText(inspSurface)}
+                  <div class="slash-palette" role="listbox" aria-label="Insertar bloque siguiente">
+                    {#each slashFilteredTypes as t, sIdx (t)}
+                      <button
+                        type="button"
+                        class="slash-palette-row"
+                        class:slash-palette-row--active={sIdx === slashMenuSelectedIndex}
+                        role="option"
+                        aria-selected={sIdx === slashMenuSelectedIndex}
+                        onmousedown={(e) => e.preventDefault()}
+                        onclick={() => void insertBlockFromSlash(t)}
+                      >
+                        <svg class="slash-palette-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                          <path d={blockTypeIcon(t)}/>
+                        </svg>
+                        <span class="slash-palette-label">{blockTypeLabel(t)}</span>
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
+                <div class={inspEditorWrapClass}>
+                  <textarea
+                    id="ib-text"
+                    class="insp-textarea insp-textarea--short"
+                    bind:value={insp_bContentText}
+                    oninput={onInspectorContentInput}
+                    onkeydown={onInspectorContentKeydown}
+                    onselect={onInspectorContentSelect}
+                    onblur={onInspectorBlur}
+                    rows={3}
+                    maxlength={2000}
+                    placeholder="Título o encabezado… Escribe / para insertar el siguiente bloque."
+                  ></textarea>
+                </div>
               </div>
             </div>
           {:else if inspSurface === 'large'}
             <div class="insp-field">
               <label class="insp-label" for="ib-text">Contenido</label>
-              <div class={inspEditorWrapClass}>
-                <textarea
-                  id="ib-text"
-                  class="insp-textarea insp-textarea--write"
-                  bind:value={insp_bContentText}
-                  oninput={markInspectorDirty}
-                  onblur={onInspectorBlur}
-                  rows={14}
-                  placeholder="Escribe aquí. Puedes usar párrafos simples; el formato rico llegará más adelante."
-                ></textarea>
+              <div class="insp-slash-host">
+                {#if slashMenuOpen && blockHasEditableText(inspSurface)}
+                  <div class="slash-palette" role="listbox" aria-label="Insertar bloque siguiente">
+                    {#each slashFilteredTypes as t, sIdx (t)}
+                      <button
+                        type="button"
+                        class="slash-palette-row"
+                        class:slash-palette-row--active={sIdx === slashMenuSelectedIndex}
+                        role="option"
+                        aria-selected={sIdx === slashMenuSelectedIndex}
+                        onmousedown={(e) => e.preventDefault()}
+                        onclick={() => void insertBlockFromSlash(t)}
+                      >
+                        <svg class="slash-palette-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                          <path d={blockTypeIcon(t)}/>
+                        </svg>
+                        <span class="slash-palette-label">{blockTypeLabel(t)}</span>
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
+                <div class={inspEditorWrapClass}>
+                  <textarea
+                    id="ib-text"
+                    class="insp-textarea insp-textarea--write"
+                    bind:value={insp_bContentText}
+                    oninput={onInspectorContentInput}
+                    onkeydown={onInspectorContentKeydown}
+                    onselect={onInspectorContentSelect}
+                    onblur={onInspectorBlur}
+                    rows={14}
+                    placeholder="Escribe aquí. Usa / para tipos de bloque (título, cita, salto…)."
+                  ></textarea>
+                </div>
               </div>
             </div>
           {:else if inspSurface === 'medium'}
             <div class="insp-field">
               <label class="insp-label" for="ib-text">Texto centrado</label>
-              <div class={inspEditorWrapClass}>
-                <textarea
-                  id="ib-text"
-                  class="insp-textarea"
-                  bind:value={insp_bContentText}
-                  oninput={markInspectorDirty}
-                  onblur={onInspectorBlur}
-                  rows={6}
-                  maxlength={1500}
-                  placeholder="Línea o frase centrada (dedicatoria, epígrafe…)…"
-                ></textarea>
+              <div class="insp-slash-host">
+                {#if slashMenuOpen && blockHasEditableText(inspSurface)}
+                  <div class="slash-palette" role="listbox" aria-label="Insertar bloque siguiente">
+                    {#each slashFilteredTypes as t, sIdx (t)}
+                      <button
+                        type="button"
+                        class="slash-palette-row"
+                        class:slash-palette-row--active={sIdx === slashMenuSelectedIndex}
+                        role="option"
+                        aria-selected={sIdx === slashMenuSelectedIndex}
+                        onmousedown={(e) => e.preventDefault()}
+                        onclick={() => void insertBlockFromSlash(t)}
+                      >
+                        <svg class="slash-palette-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                          <path d={blockTypeIcon(t)}/>
+                        </svg>
+                        <span class="slash-palette-label">{blockTypeLabel(t)}</span>
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
+                <div class={inspEditorWrapClass}>
+                  <textarea
+                    id="ib-text"
+                    class="insp-textarea"
+                    bind:value={insp_bContentText}
+                    oninput={onInspectorContentInput}
+                    onkeydown={onInspectorContentKeydown}
+                    onselect={onInspectorContentSelect}
+                    onblur={onInspectorBlur}
+                    rows={6}
+                    maxlength={1500}
+                    placeholder="Línea o frase centrada… / para insertar después."
+                  ></textarea>
+                </div>
               </div>
             </div>
           {:else if inspSurface === 'image_placeholder'}
@@ -2132,8 +2358,8 @@
     flex: 1;
     height: 100%;
     overflow: hidden;
-    background: #0f0f1a;
-    color: #e8e8f4;
+    background: var(--editor-surface-mid);
+    color: var(--editor-text);
     font-family: 'Helvetica Neue', Arial, sans-serif;
     position: relative;
   }
@@ -2153,6 +2379,30 @@
     gap: 8px;
   }
   .global-error strong { color: #f09090; }
+
+  .global-notice {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 99;
+    font-size: 12px;
+    padding: 8px 16px 8px 40px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .global-notice--ok {
+    background: rgba(60, 140, 90, 0.18);
+    border-bottom: 1px solid rgba(80, 160, 110, 0.35);
+    color: #a8e8c8;
+  }
+
+  .global-notice--ok .alert-close {
+    color: #a8e8c8;
+  }
+
   .alert-close {
     margin-left: auto;
     background: none;
@@ -2163,6 +2413,9 @@
     line-height: 1;
     padding: 0 2px;
     opacity: 0.7;
+  }
+  .global-error .alert-close {
+    color: #f09090;
   }
   .alert-close:hover { opacity: 1; }
 
@@ -2178,8 +2431,8 @@
 
   .panel--sections {
     width: 236px;
-    border-right: 1px solid rgba(255,255,255,0.06);
-    background: #0b0b16;
+    border-right: 1px solid var(--editor-border);
+    background: var(--editor-surface-void);
   }
 
   .panel--blocks {
@@ -2188,13 +2441,13 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
-    border-right: 1px solid rgba(255,255,255,0.06);
-    background: #0f0f1a;
+    border-right: 1px solid var(--editor-border);
+    background: var(--editor-surface-mid);
   }
 
   .panel--inspector {
     width: 272px;
-    background: #0d0d1e;
+    background: var(--editor-surface-inspector);
   }
 
   /* Panel header */
@@ -2204,7 +2457,7 @@
     justify-content: space-between;
     padding: 0 14px;
     height: 44px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid var(--editor-border);
     flex-shrink: 0;
     gap: 8px;
   }
@@ -2221,7 +2474,7 @@
     font-weight: 700;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: rgba(255,255,255,0.3);
+    color: var(--editor-text-faint);
   }
 
   /* Panel body scrollable */
@@ -2264,7 +2517,7 @@
 
   .panel-empty {
     padding: 20px 16px;
-    color: rgba(255,255,255,0.3);
+    color: var(--editor-text-faint);
     font-size: 12px;
     text-align: center;
     display: flex;
@@ -2286,9 +2539,15 @@
   .dirty-dot {
     width: 6px; height: 6px;
     border-radius: 50%;
-    background: #7ab8e8;
+    background: var(--editor-accent);
     flex-shrink: 0;
     animation: pulse 1.5s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dirty-dot {
+      animation: none;
+    }
   }
 
   /* ═══════════════════════════════════════════════════════════════════════════
@@ -2300,24 +2559,47 @@
     padding: 6px 0;
   }
 
-  .section-item {
+  .section-row {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 8px 10px;
-    cursor: pointer;
-    border-radius: 0;
-    transition: background 0.1s, border-color 0.1s, box-shadow 0.1s;
-    border-left: 3px solid transparent;
+    gap: 4px;
+    padding: 0 6px 0 0;
   }
 
-  .section-item:hover { background: rgba(255,255,255,0.04); }
-
-  .section-item--active {
-    background: rgba(122,184,232,0.12) !important;
-    border-left: 3px solid #7ab8e8;
-    box-shadow: inset 0 0 0 1px rgba(122,184,232,0.12);
+  .section-item-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    margin: 0;
+    padding: 8px 10px;
+    background: none;
+    border: none;
+    border-left: 3px solid transparent;
     border-radius: 0 8px 8px 0;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    transition:
+      background var(--editor-duration) var(--editor-ease),
+      border-color var(--editor-duration) var(--editor-ease),
+      box-shadow var(--editor-duration) var(--editor-ease);
+  }
+
+  .section-item-main:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .section-item-main:focus-visible {
+    outline: 2px solid var(--editor-accent);
+    outline-offset: 1px;
+  }
+
+  .section-item-main--active {
+    background: rgba(122, 184, 232, 0.12) !important;
+    border-left-color: var(--editor-accent);
+    box-shadow: inset 0 0 0 1px var(--editor-accent-glow);
   }
 
   /* Flechas de orden de sección */
@@ -2337,7 +2619,9 @@
     line-height: 1;
     padding: 1px 3px;
     border-radius: 3px;
-    transition: color 0.1s, background 0.1s;
+    transition:
+      color var(--editor-duration) var(--editor-ease),
+      background var(--editor-duration) var(--editor-ease);
   }
   .arrow-btn:hover:not(:disabled) { color: rgba(255,255,255,0.7); background: rgba(255,255,255,0.07); }
   .arrow-btn:disabled { opacity: 0.2; cursor: default; }
@@ -2354,24 +2638,28 @@
   .section-title-text {
     font-size: 12px;
     font-weight: 600;
-    color: rgba(255,255,255,0.75);
+    color: var(--editor-text-soft);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  .section-item--active .section-title-text { color: #7ab8e8; }
+  .section-item-main--active .section-title-text {
+    color: var(--editor-accent);
+  }
 
   .section-type-muted {
     font-size: 10px;
-    color: rgba(255,255,255,0.32);
+    color: rgba(255, 255, 255, 0.32);
     line-height: 1.3;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  .section-item--active .section-type-muted { color: rgba(122,184,232,0.65); }
+  .section-item-main--active .section-type-muted {
+    color: var(--editor-accent-muted);
+  }
 
   /* ═══════════════════════════════════════════════════════════════════════════
      PANEL CENTRAL — BLOQUES
@@ -2382,7 +2670,7 @@
     justify-content: space-between;
     padding: 0 20px;
     height: 52px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid var(--editor-border);
     flex-shrink: 0;
     gap: 12px;
   }
@@ -2426,6 +2714,81 @@
     flex-shrink: 0;
   }
 
+  .blocks-quick-insert-wrap {
+    position: relative;
+  }
+
+  .blocks-slash-btn {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+  }
+
+  .quick-insert-pop {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 30;
+    min-width: 220px;
+    max-height: min(320px, 52vh);
+    overflow-y: auto;
+    padding: 4px;
+    border-radius: 8px;
+    border: 1px solid var(--editor-border-strong);
+    background: var(--editor-surface-elevated);
+    box-shadow: var(--editor-shadow-popover);
+    animation: content-popover-in var(--editor-duration) var(--editor-ease);
+  }
+
+  @keyframes content-popover-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .quick-insert-pop {
+      animation: none;
+    }
+  }
+
+  .quick-insert-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 7px 9px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 12px;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--editor-duration) var(--editor-ease);
+  }
+
+  .quick-insert-row:hover:not(:disabled) {
+    background: var(--editor-accent-soft);
+  }
+
+  .quick-insert-row:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .quick-insert-ico {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    opacity: 0.75;
+  }
+
   .blocks-body {
     flex: 1;
     min-height: 0;
@@ -2455,6 +2818,15 @@
     display: flex;
     justify-content: center;
     margin: 2px 0 6px;
+    opacity: 0;
+    transition: opacity var(--editor-duration) var(--editor-ease);
+  }
+
+  .manuscript-doc:hover .manuscript-insert-row,
+  .manuscript-insert-row:hover,
+  .manuscript-insert-row:focus-within,
+  .manuscript-block.block-item:hover + .manuscript-insert-row {
+    opacity: 1;
   }
   .manuscript-insert-btn {
     width: 20px;
@@ -2485,16 +2857,30 @@
     border-radius: 8px;
     border: 1px solid transparent;
     background: transparent;
-    cursor: text;
-    transition: background 0.12s, border-color 0.12s;
+    cursor: pointer;
+    transition:
+      background var(--editor-duration) var(--editor-ease),
+      border-color var(--editor-duration) var(--editor-ease),
+      box-shadow var(--editor-duration) var(--editor-ease);
   }
   .manuscript-block.block-item:hover {
     background: rgba(40, 66, 97, 0.05);
     border-color: rgba(40, 66, 97, 0.16);
   }
+  .manuscript-block.block-item:focus-visible {
+    outline: 2px solid var(--editor-accent);
+    outline-offset: 2px;
+  }
   .manuscript-block.block-item.block-item--active {
     background: rgba(53, 99, 153, 0.09) !important;
     border-color: rgba(53, 99, 153, 0.3) !important;
+    box-shadow: 0 0 0 1px rgba(53, 99, 153, 0.12);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .manuscript-block.block-item {
+      transition: none;
+    }
   }
   .manuscript-block-meta {
     display: flex;
@@ -2654,7 +3040,7 @@
     padding: 0 0 10px;
     margin: 0 0 8px;
     border: none;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid var(--editor-border);
     background: none;
     color: rgba(122,184,232,0.85);
     font-size: 11px;
@@ -3185,6 +3571,103 @@
     gap: 12px;
   }
 
+  .insp-context-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    padding: 6px 7px;
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--editor-border);
+  }
+
+  .ctx-chip {
+    padding: 3px 8px;
+    border-radius: 5px;
+    border: 1px solid var(--editor-border-strong);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--editor-text-muted);
+    font-size: 10px;
+    font-weight: 600;
+    font-family: inherit;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    transition:
+      background var(--editor-duration) var(--editor-ease),
+      border-color var(--editor-duration) var(--editor-ease),
+      color var(--editor-duration) var(--editor-ease);
+  }
+
+  .ctx-chip:focus-visible {
+    outline: 2px solid var(--editor-accent);
+    outline-offset: 1px;
+  }
+
+  .ctx-chip:hover {
+    color: rgba(255, 255, 255, 0.88);
+    border-color: var(--editor-accent-border);
+    background: rgba(122, 184, 232, 0.1);
+  }
+
+  .ctx-chip--on {
+    color: #9fd4ff;
+    border-color: rgba(122, 184, 232, 0.45);
+    background: var(--editor-accent-soft);
+  }
+
+  .insp-slash-host {
+    position: relative;
+  }
+
+  .slash-palette {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(100% + 6px);
+    z-index: 25;
+    max-height: 200px;
+    overflow-y: auto;
+    padding: 4px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: #141428;
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.42);
+  }
+
+  .slash-palette-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 8px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 11px;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.08s;
+  }
+
+  .slash-palette-row:hover,
+  .slash-palette-row--active {
+    background: rgba(122, 184, 232, 0.16);
+  }
+
+  .slash-palette-ico {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    opacity: 0.72;
+  }
+
+  .slash-palette-label {
+    flex: 1;
+    min-width: 0;
+  }
+
   .insp-field {
     display: flex;
     flex-direction: column;
@@ -3323,7 +3806,7 @@
     margin: 0;
     font-size: 10px;
     line-height: 1.45;
-    color: rgba(255,255,255,0.3);
+    color: var(--editor-text-faint);
   }
 
   .insp-debug-note {
@@ -3419,7 +3902,7 @@
     border: 1px solid transparent;
     cursor: pointer;
     transition: background 0.12s, color 0.12s;
-    color: rgba(255,255,255,0.3);
+    color: var(--editor-text-faint);
     flex-shrink: 0;
   }
   .icon-btn:hover { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.7); }
@@ -3460,11 +3943,6 @@
   .modal--insert-block {
     max-width: 420px;
     /* Menú nativo del <select> en Chromium/Electron: evita lista blanca ilegible */
-    color-scheme: dark;
-  }
-
-  .modal--md-import {
-    max-width: 520px;
     color-scheme: dark;
   }
 
@@ -3520,112 +3998,6 @@
     clip: rect(0, 0, 0, 0);
     white-space: nowrap;
     border: 0;
-  }
-
-  .md-code {
-    font-family: ui-monospace, 'Cascadia Code', 'Segoe UI Mono', monospace;
-    font-size: 0.92em;
-    padding: 1px 5px;
-    border-radius: 4px;
-    background: rgba(255,255,255,0.08);
-    color: rgba(200,220,255,0.95);
-  }
-
-  .md-import-textarea {
-    min-height: 200px;
-    font-family: ui-monospace, 'Cascadia Code', 'Segoe UI Mono', monospace;
-    font-size: 12px;
-    line-height: 1.45;
-  }
-
-  .form-field--row-md {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 10px;
-    margin-top: -4px;
-  }
-
-  .md-import-mode {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-top: 4px;
-  }
-
-  .md-radio {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    color: rgba(255,255,255,0.78);
-    cursor: pointer;
-  }
-
-  .md-radio input {
-    accent-color: #7ab8e8;
-  }
-
-  .md-import-preview {
-    padding: 12px 14px;
-    border-radius: 8px;
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.08);
-  }
-
-  .md-import-preview-title {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: rgba(255,255,255,0.42);
-    margin: 0 0 8px;
-  }
-
-  .md-import-preview-meta {
-    font-size: 12px;
-    color: rgba(255,255,255,0.55);
-    margin: 0 0 10px;
-    line-height: 1.45;
-  }
-
-  .md-import-preview-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    max-height: 200px;
-    overflow-y: auto;
-    scrollbar-width: thin;
-  }
-
-  .md-import-preview-list li {
-    display: flex;
-    gap: 10px;
-    align-items: baseline;
-    font-size: 12px;
-    line-height: 1.35;
-  }
-
-  .md-import-preview-type {
-    flex-shrink: 0;
-    font-size: 10px;
-    font-weight: 600;
-    color: rgba(122,184,232,0.9);
-    min-width: 5.5rem;
-  }
-
-  .md-import-preview-excerpt {
-    color: rgba(255,255,255,0.55);
-    word-break: break-word;
-  }
-
-  .md-import-preview-more {
-    font-size: 11px;
-    color: rgba(255,255,255,0.35);
-    margin: 8px 0 0;
   }
 
   .modal-actions--stack {

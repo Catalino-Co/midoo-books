@@ -69,6 +69,12 @@ export {
   type BookMarkdownImportPreviewSectionRow,
 } from '$lib/core/editorial/markdown-book-import';
 
+export {
+  inferMarkdownImportSuggestion,
+  type MarkdownImportHint,
+  type MarkdownImportTargetHint,
+} from '$lib/core/editorial/markdown-import-hints';
+
 export { inferSectionTypeFromTitle } from '$lib/core/editorial/section-title-heuristic';
 
 export {
@@ -313,6 +319,23 @@ export async function createBlockInSection(
   const created = await createBlock({ sectionId, ...input });
   const merged = [...orderedIds];
   merged.splice(insertPos, 0, created.id);
+  await getPlatformAdapter().reorderBlocks(sectionId, merged);
+  const fresh = await listBlocks(sectionId);
+  return fresh.find(b => b.id === created.id) ?? created;
+}
+
+/**
+ * Crea un bloque al inicio de la sección (antes del primer bloque existente).
+ */
+export async function createBlockFirstInSection(
+  sectionId: string,
+  currentBlocks: DocumentBlock[],
+  input: Omit<CreateBlockInput, 'sectionId'>,
+): Promise<DocumentBlock> {
+  const sorted = [...currentBlocks].sort((a, b) => a.orderIndex - b.orderIndex);
+  const orderedIds = sorted.map(b => b.id);
+  const created = await createBlock({ sectionId, ...input });
+  const merged = [created.id, ...orderedIds];
   await getPlatformAdapter().reorderBlocks(sectionId, merged);
   const fresh = await listBlocks(sectionId);
   return fresh.find(b => b.id === created.id) ?? created;
