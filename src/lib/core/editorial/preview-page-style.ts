@@ -4,6 +4,11 @@
 
 import type { LayoutSettings } from '$lib/core/domain/layout';
 import { getPageContentBoxMm, pageDimensionsMm, safeAreaInsetsFromContentMm } from './document-page-geometry';
+import {
+  PREVIEW_FLOW_PAD_BOTTOM_MM,
+  PREVIEW_FLOW_PAD_TOP_MM,
+  PREVIEW_FLOW_PAD_X_MM,
+} from './document-layout-metrics';
 import type { PageSpreadSide } from './page-layout-model';
 
 /** Aspecto alto/ancho de la hoja (sin bleed). */
@@ -51,9 +56,9 @@ export function buildPreviewSafeAreaStyle(settings: LayoutSettings): string {
 /** Padding del flujo respecto a la caja útil (proporcional al trim / márgenes). */
 export function buildPreviewBodyPaddingStyle(settings: LayoutSettings, side: PageSpreadSide): string {
   const b = getPageContentBoxMm(settings, side);
-  const padTop = (14 / b.contentHeightMm) * 100;
-  const padX = (22 / b.contentWidthMm) * 100;
-  const padBottom = (18 / b.contentHeightMm) * 100;
+  const padTop = (PREVIEW_FLOW_PAD_TOP_MM / b.contentHeightMm) * 100;
+  const padX = (PREVIEW_FLOW_PAD_X_MM / b.contentWidthMm) * 100;
+  const padBottom = (PREVIEW_FLOW_PAD_BOTTOM_MM / b.contentHeightMm) * 100;
   return [
     `padding:${padTop}% ${padX}% ${padBottom}% ${padX}%`,
     `--flow-pull-y:${padTop}%`,

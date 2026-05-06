@@ -42,18 +42,16 @@ const QUOTE_LINE_UNITS = 20;
 const PARAGRAPH_TOP_UNITS = 16;
 const PARAGRAPH_CONTINUATION_TOP_UNITS = 8;
 const QUOTE_TOP_UNITS = 20;
-const MIN_PARAGRAPH_LINES_PER_FRAGMENT = 3;
+const MIN_PARAGRAPH_LINES_PER_FRAGMENT = 2;
 const MIN_PARAGRAPH_LINES_AT_PAGE_BOTTOM = 2;
 const MIN_PARAGRAPH_LINES_AT_PAGE_TOP = 2;
+const KEEP_TOGETHER_MAX_PARAGRAPH_LINES = 4;
 const HEADING_KEEP_WITH_NEXT_LINES = 3;
-const PREFERRED_BREAK_SCAN_BACK_LINES = 3;
 const SHORT_SPECIAL_BLOCK_MAX_UNITS = 220;
 const SPECIAL_BLOCK_MIN_BOTTOM_BREATHING_ROOM = 44;
 const TOC_ENTRY_UNITS = 26;
 const TOC_TITLE_UNITS = 52;
 const TOC_EMPTY_UNITS = 28;
-const SENTENCE_END_RE = /[.!?…:"')\]]$/;
-const SOFT_BREAK_RE = /[,;—–)]$/;
 const TEXT_LINE_UNITS_PER_PT =
   PARAGRAPH_LINE_UNITS / (DEFAULT_LAYOUT_SETTINGS.bodyFontSize * DEFAULT_LAYOUT_SETTINGS.bodyLineHeight);
 const SPACING_UNITS_PER_PT = GAP_AFTER_BLOCK / Math.max(1, DEFAULT_LAYOUT_SETTINGS.paragraphSpacing);
@@ -273,45 +271,6 @@ function estimateTocUnits(entryCount: number, includeTitle: boolean, bookStyles?
   return titleUnits + bodyUnits;
 }
 
-function breakScore(line: string): number {
-  const trimmed = line.trim();
-  if (!trimmed) return 4;
-  if (SENTENCE_END_RE.test(trimmed)) return 3;
-  if (SOFT_BREAK_RE.test(trimmed)) return 2;
-  return 0;
-}
-
-function selectPreferredBreakLine(
-  lines: string[],
-  preferredLineCount: number,
-  minFirstLines: number,
-  minRemainingLines: number,
-): { lineCount: number; adjusted: boolean } {
-  const maxLineCount = lines.length - minRemainingLines;
-  const clampedPreferred = Math.min(Math.max(preferredLineCount, minFirstLines), maxLineCount);
-  let best = clampedPreferred;
-  let bestScore = breakScore(lines[clampedPreferred - 1] ?? '');
-
-  for (
-    let candidate = clampedPreferred - 1;
-    candidate >= Math.max(minFirstLines, clampedPreferred - PREFERRED_BREAK_SCAN_BACK_LINES);
-    candidate--
-  ) {
-    if (lines.length - candidate < minRemainingLines) continue;
-    const score = breakScore(lines[candidate - 1] ?? '');
-    if (score > bestScore) {
-      best = candidate;
-      bestScore = score;
-      if (bestScore >= 3) break;
-    }
-  }
-
-  return {
-    lineCount: best,
-    adjusted: best !== preferredLineCount,
-  };
-}
-
 /** Reservado para reglas por tipo (COVER, TOC…); v1: toda sección tras la primera abre en página nueva. */
 function sectionStartsOnFreshPage(_sectionType: SectionType, isFirstSection: boolean): boolean {
   if (isFirstSection) return false;
@@ -406,6 +365,14 @@ class Paginator {
 
   remaining(): number {
     return Math.max(0, this.metrics.pageBodyHeightUnits - this.used);
+  }
+
+  private placementGapBefore(): number {
+    return this.pages[this.currentIdx].placements.length > 0 ? GAP_AFTER_BLOCK : 0;
+  }
+
+  private availableForPlacement(): number {
+    return Math.max(0, this.remaining() - this.placementGapBefore());
   }
 
   private effectiveStyle(section: DocumentSection, block: DocumentBlock): BookStyleDefinition | null {
@@ -555,7 +522,7 @@ class Paginator {
   ): void {
     this.touchPrimarySection(section);
     const p = this.pages[this.currentIdx];
-    const gapBefore = p.placements.length > 0 ? GAP_AFTER_BLOCK : 0;
+    const gapBefore = this.placementGapBefore();
     p.placements.push(placed);
     this.bumpUsed(gapBefore + height);
   }
@@ -592,15 +559,6 @@ class Paginator {
       fitLines = lines.length - MIN_PARAGRAPH_LINES_AT_PAGE_TOP;
       widowOrphanAdjusted = true;
     }
-
-    const preferred = selectPreferredBreakLine(
-      lines,
-      fitLines,
-      minFirstLines,
-      MIN_PARAGRAPH_LINES_AT_PAGE_TOP,
-    );
-    fitLines = preferred.lineCount;
-    widowOrphanAdjusted = widowOrphanAdjusted || preferred.adjusted;
 
     if (fitLines <= 0 || fitLines >= lines.length) return null;
 
@@ -654,7 +612,7 @@ class Paginator {
     const nextUnits = this.minimumNextBlockUnits(next, section);
     const requiredUnits = resolvedHeadingUnits + GAP_AFTER_BLOCK + nextUnits;
 
-    return requiredUnits > this.remaining();
+    return requiredUnits > this.availableForPlacement();
   }
 
   private shouldPreferFreshPageForSpecialBlock(
@@ -670,7 +628,7 @@ class Paginator {
       return false;
     }
 
-    const crampedFit = this.remaining() - blockHeight < SPECIAL_BLOCK_MIN_BOTTOM_BREATHING_ROOM;
+    const crampedFit = this.availableForPlacement() - blockHeight < SPECIAL_BLOCK_MIN_BOTTOM_BREATHING_ROOM;
     return blockHeight <= SHORT_SPECIAL_BLOCK_MAX_UNITS && crampedFit;
   }
 
@@ -686,22 +644,27 @@ class Paginator {
       continuesOnNextPage: false,
     });
     const totalUnits = measuredWhole?.totalUnits ?? estimateTextBlockUnits(block.contentText, paragraphStyle, paragraphChars);
-    const shouldKeepWhole = block.keepTogether && totalUnits <= this.metrics.pageBodyHeightUnits;
+    const totalLineCount = measuredWhole?.lineCount ?? totalLines.length;
+    const shouldKeepWhole = block.keepTogether
+      && totalLineCount <= KEEP_TOGETHER_MAX_PARAGRAPH_LINES
+      && totalUnits <= this.metrics.pageBodyHeightUnits;
 
-    if (shouldKeepWhole && totalUnits > this.remaining() && this.used > 0) {
+    if (shouldKeepWhole && totalUnits > this.availableForPlacement() && this.used > 0) {
       this.startNewContentPage('keepTogether en párrafo');
     }
 
     if (
+      !this.textMeasurement
+      &&
       !shouldKeepWhole
       && totalUnits <= this.metrics.pageBodyHeightUnits
       && this.used > 0
-      && maxParagraphLinesForUnits(this.remaining(), false, paragraphStyle) < Math.min(totalLines.length, MIN_PARAGRAPH_LINES_PER_FRAGMENT)
+      && maxParagraphLinesForUnits(this.availableForPlacement(), false, paragraphStyle) < Math.min(totalLines.length, MIN_PARAGRAPH_LINES_PER_FRAGMENT)
     ) {
       this.startNewContentPage('Evitar huérfana al final de página');
     }
 
-    if (shouldKeepWhole || totalUnits <= this.remaining()) {
+    if (shouldKeepWhole || totalUnits <= this.availableForPlacement()) {
       this.placePlacement(section, {
         block,
         estimatedUnits: totalUnits,
@@ -716,10 +679,14 @@ class Paginator {
 
     let remainingText = block.contentText;
     let lineOffset = 0;
+    let fragmentIndex = 0;
     let continued = false;
 
     while (remainingText.trim().length > 0) {
-      if (this.remaining() < estimateParagraphFragmentUnits(MIN_PARAGRAPH_LINES_PER_FRAGMENT, continued, paragraphStyle, true)) {
+      if (
+        !this.textMeasurement
+        && this.availableForPlacement() < estimateParagraphFragmentUnits(MIN_PARAGRAPH_LINES_PER_FRAGMENT, continued, paragraphStyle, true)
+      ) {
         if (this.used > 0) {
           this.startNewContentPage('Continuación de párrafo');
           continued = true;
@@ -727,26 +694,91 @@ class Paginator {
         }
       }
 
-      const split = this.splitParagraph(remainingText, this.remaining(), continued, paragraphStyle);
+      const availableUnits = this.availableForPlacement();
+      const measuringContinuation = continued || lineOffset > 0;
+      const tailLines = wrapTextToLines(remainingText, paragraphChars);
+      const measuredTail = this.measureTextBlockUnits(block, section, remainingText, {
+        continuedFromPreviousPage: measuringContinuation,
+        continuesOnNextPage: false,
+      });
+      const tailUnits = measuredTail?.totalUnits
+        ?? estimateParagraphFragmentUnits(tailLines.length, continued, paragraphStyle, false);
+
+      if (tailUnits <= availableUnits || this.used === 0 && tailUnits <= this.metrics.pageBodyHeightUnits) {
+        this.placePlacement(section, {
+          block,
+          textOverride: remainingText,
+          estimatedUnits: tailUnits,
+          debugMeta: {
+            fragmented: continued || lineOffset > 0,
+            continuedFromPreviousPage: continued || lineOffset > 0,
+            continuesOnNextPage: false,
+            fragmentLineStart: lineOffset,
+            fragmentLineCount: measuredTail?.lineCount ?? tailLines.length,
+            fragmentIndex,
+            wasSplit: continued || lineOffset > 0,
+            keepTogetherApplied: shouldKeepWhole,
+            nonFragmentable: false,
+          },
+        }, tailUnits);
+        break;
+      }
+
+      const split = this.splitParagraph(remainingText, availableUnits, continued, paragraphStyle);
+      const estimatedMaxLines = maxParagraphLinesForUnits(
+        availableUnits,
+        continued || lineOffset > 0,
+        paragraphStyle,
+      );
+      const measuredHeuristicSplit = this.textMeasurement && split
+        ? (() => {
+          const measured = this.textMeasurement!.measureTextBlock({
+            blockType: 'PARAGRAPH',
+            text: split.first,
+            style: paragraphStyle,
+            continuedFromPreviousPage: continued || lineOffset > 0,
+            continuesOnNextPage: true,
+          });
+          if (measured.totalUnits > availableUnits) return null;
+          return {
+            first: split.first,
+            rest: split.rest,
+            lineCount: measured.lineCount,
+            widowOrphanAdjusted: split.widowOrphanAdjusted,
+            measuredUnits: measured.totalUnits,
+          };
+        })()
+        : null;
       const measuredSplit = this.textMeasurement
         ? this.textMeasurement.splitParagraph({
           text: remainingText,
           style: paragraphStyle,
-          availableUnits: this.remaining(),
-          continuedFromPreviousPage: continued,
-          minLinesAtPageBottom: Math.max(MIN_PARAGRAPH_LINES_AT_PAGE_BOTTOM, MIN_PARAGRAPH_LINES_PER_FRAGMENT),
+          availableUnits,
+          continuedFromPreviousPage: continued || lineOffset > 0,
+          minLinesAtPageBottom: MIN_PARAGRAPH_LINES_AT_PAGE_BOTTOM,
           minLinesAtPageTop: MIN_PARAGRAPH_LINES_AT_PAGE_TOP,
         })
         : null;
+      const estimatedSplit = this.textMeasurement ? null : split;
+      const splitMode = measuredSplit
+        ? 'measured'
+        : measuredHeuristicSplit
+          ? 'measured-heuristic'
+          : estimatedSplit
+            ? 'estimated'
+            : 'none';
 
-      if (!split && !measuredSplit) {
-        const lines = wrapTextToLines(remainingText, paragraphChars);
-        const measuredTail = this.measureTextBlockUnits(block, section, remainingText, {
-          continuedFromPreviousPage: continued,
-          continuesOnNextPage: false,
-        });
-        const h = measuredTail?.totalUnits ?? estimateParagraphFragmentUnits(lines.length, continued, paragraphStyle, false);
-        if (h > this.remaining() && this.used > 0) {
+      if (!estimatedSplit && !measuredSplit && !measuredHeuristicSplit) {
+        this.pages[this.currentIdx].debugNotes.push(
+          [
+            'Split párrafo: sin corte válido',
+            `disp=${Math.round(availableUnits)}u`,
+            `maxEstimadas=${estimatedMaxLines}`,
+            `tailLíneas=${measuredTail?.lineCount ?? tailLines.length}`,
+            `offset=${lineOffset}`,
+          ].join(' · '),
+        );
+        if (tailUnits > this.availableForPlacement() && this.used > 0) {
           this.startNewContentPage('Continuación de párrafo');
           continued = true;
           continue;
@@ -754,17 +786,19 @@ class Paginator {
         this.placePlacement(section, {
           block,
           textOverride: remainingText,
-          estimatedUnits: h,
+          estimatedUnits: tailUnits,
           debugMeta: {
             fragmented: continued || lineOffset > 0,
             continuedFromPreviousPage: continued || lineOffset > 0,
             continuesOnNextPage: false,
             fragmentLineStart: lineOffset,
-            fragmentLineCount: measuredTail?.lineCount ?? lines.length,
+            fragmentLineCount: measuredTail?.lineCount ?? tailLines.length,
+            fragmentIndex,
+            wasSplit: continued || lineOffset > 0,
             keepTogetherApplied: shouldKeepWhole,
             nonFragmentable: false,
           },
-        }, h);
+        }, tailUnits);
         break;
       }
 
@@ -776,14 +810,32 @@ class Paginator {
           widowOrphanAdjusted: measuredSplit.widowOrphanAdjusted,
           measuredUnits: measuredSplit.measuredUnits,
         }
-        : {
+        : measuredHeuristicSplit
+          ? measuredHeuristicSplit
+          : {
           first: split!.first,
           rest: split!.rest,
           lineCount: split!.lineCount,
           widowOrphanAdjusted: split!.widowOrphanAdjusted,
-          measuredUnits: estimateParagraphFragmentUnits(split!.lineCount, continued, paragraphStyle, true),
+          measuredUnits: estimateParagraphFragmentUnits(
+            split!.lineCount,
+            continued || lineOffset > 0,
+            paragraphStyle,
+            true,
+          ),
         };
       const h = effectiveSplit.measuredUnits;
+      this.pages[this.currentIdx].debugNotes.push(
+        [
+          'Split párrafo',
+          `modo=${splitMode}`,
+          `disp=${Math.round(availableUnits)}u`,
+          `maxEstimadas=${estimatedMaxLines}`,
+          `usadas=${effectiveSplit.lineCount}`,
+          `restantes=${Math.max(0, (measuredTail?.lineCount ?? tailLines.length) - effectiveSplit.lineCount)}`,
+          `offset=${lineOffset}`,
+        ].join(' · '),
+      );
       this.placePlacement(section, {
         block,
         textOverride: effectiveSplit.first,
@@ -794,6 +846,9 @@ class Paginator {
           continuesOnNextPage: true,
           fragmentLineStart: lineOffset,
           fragmentLineCount: effectiveSplit.lineCount,
+          fragmentIndex,
+          wasSplit: true,
+          remainingTextPreview: effectiveSplit.rest.slice(0, 120),
           keepTogetherApplied: shouldKeepWhole,
           widowOrphanAdjusted: effectiveSplit.widowOrphanAdjusted,
           nonFragmentable: false,
@@ -802,6 +857,7 @@ class Paginator {
 
       remainingText = effectiveSplit.rest;
       lineOffset += effectiveSplit.lineCount;
+      fragmentIndex += 1;
       this.startNewContentPage('Continuación de párrafo fragmentado');
       continued = true;
     }
@@ -838,7 +894,7 @@ class Paginator {
 
     if (tocEntries.length === 0) {
       const height = estimateTocUnits(0, showTitleInChunk, this.bookStyles);
-      if (height > this.remaining() && this.used > 0) {
+      if (height > this.availableForPlacement() && this.used > 0) {
         this.startNewContentPage('Continuación de TOC');
       }
       this.placePlacement(section, {
@@ -852,11 +908,11 @@ class Paginator {
     }
 
     while (index < tocEntries.length) {
-      if (this.remaining() < tocEntryUnits * 2 && this.used > 0) {
+      if (this.availableForPlacement() < tocEntryUnits * 2 && this.used > 0) {
         this.startNewContentPage('Continuación de TOC');
       }
 
-      const availableUnits = this.remaining() - (showTitleInChunk ? tocTitleUnits : 0);
+      const availableUnits = this.availableForPlacement() - (showTitleInChunk ? tocTitleUnits : 0);
       const fitCount = Math.max(
         1,
         Math.min(
@@ -868,7 +924,7 @@ class Paginator {
       const chunk = tocEntries.slice(index, index + chunkCount);
       const height = estimateTocUnits(chunk.length, showTitleInChunk, this.bookStyles);
 
-      if (height > this.remaining() && this.used > 0) {
+      if (height > this.availableForPlacement() && this.used > 0) {
         this.startNewContentPage('Continuación de TOC');
         continue;
       }
@@ -949,7 +1005,7 @@ class Paginator {
 
     if (block.keepTogether && next) {
       const combined = h + GAP_AFTER_BLOCK + this.estimateBlockHeightForPlacement(next, section);
-      if (combined > this.remaining()) {
+      if (combined > this.availableForPlacement()) {
         this.startNewContentPage('keepTogether con el bloque siguiente');
       }
     }
@@ -958,7 +1014,7 @@ class Paginator {
       this.startNewContentPage(`Mejor acomodo visual de ${block.blockType}`);
     }
 
-    if (h > this.remaining()) {
+    if (h > this.availableForPlacement()) {
       if (this.used > 0) {
         this.startNewContentPage(
           h > this.metrics.pageBodyHeightUnits ? 'Bloque más alto que una página' : 'Desborde vertical',

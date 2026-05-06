@@ -42,6 +42,9 @@ export interface PlacedBlock {
     continuesOnNextPage?: boolean;
     fragmentLineStart?: number;
     fragmentLineCount?: number;
+    fragmentIndex?: number;
+    wasSplit?: boolean;
+    remainingTextPreview?: string;
     keepWithNextApplied?: boolean;
     keepTogetherApplied?: boolean;
     widowOrphanAdjusted?: boolean;

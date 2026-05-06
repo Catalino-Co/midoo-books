@@ -10,6 +10,7 @@ import type { BookLayoutSnapshot } from '$lib/core/editorial/page-layout-model';
 import { buildPaginatedLayout } from '$lib/core/editorial/page-layout-engine';
 import type { PaginatedBookResult } from '$lib/core/editorial/page-layout-model';
 import { BrowserPreviewTextMeasurer } from '$lib/core/editorial/browser-preview-text-measurer';
+import { computeLayoutEngineMetricsForPreviewWidth } from '$lib/core/editorial/document-layout-metrics';
 
 export async function loadBookLayoutSnapshot(bookId: string): Promise<BookLayoutSnapshot> {
   const book = await getBook(bookId);
@@ -40,11 +41,14 @@ export async function computePaginatedPreviewForBrowser(snapshot: BookLayoutSnap
     return buildPaginatedLayout(snapshot);
   }
 
-  const fallback = buildPaginatedLayout(snapshot);
-  const measurer = new BrowserPreviewTextMeasurer(fallback.engineMetrics);
+  const pageWidthPx = typeof window === 'undefined'
+    ? 440
+    : Math.min(440, Math.max(260, window.innerWidth * 0.92));
+  const engineMetrics = computeLayoutEngineMetricsForPreviewWidth(snapshot.layoutSettings, pageWidthPx);
+  const measurer = new BrowserPreviewTextMeasurer(engineMetrics);
   try {
     return buildPaginatedLayout(snapshot, {
-      engineMetrics: fallback.engineMetrics,
+      engineMetrics,
       textMeasurement: measurer,
     });
   } finally {

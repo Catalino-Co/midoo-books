@@ -617,26 +617,41 @@
     font-weight: 700;
     margin: 0 0 0.5em;
     line-height: 1.2;
+    overflow-wrap: normal;
+    word-break: normal;
+    hyphens: none;
   }
   .flow-h2 {
     font-size: 1.15rem;
     font-weight: 700;
     margin: 0.6em 0 0.35em;
     line-height: 1.25;
+    overflow-wrap: normal;
+    word-break: normal;
+    hyphens: none;
   }
   .flow-p {
     margin: 0 0 0.75em;
+    overflow-wrap: normal;
+    word-break: normal;
+    hyphens: none;
   }
   .flow-quote {
     margin: 0.6em 0;
     padding: 0.5em 0 0.5em 0.9em;
     border-left: 3px solid rgba(0, 0, 0, 0.15);
     color: rgba(0, 0, 0, 0.72);
+    overflow-wrap: normal;
+    word-break: normal;
+    hyphens: none;
   }
   .flow-center {
     text-align: center;
     font-style: italic;
     margin: 0.8em 0;
+    overflow-wrap: normal;
+    word-break: normal;
+    hyphens: none;
   }
   .flow-sep {
     border: none;

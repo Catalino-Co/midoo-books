@@ -2049,20 +2049,6 @@
             <div class="insp-section-label">Flujo de página</div>
 
             <div class="insp-field insp-field--inline">
-              <label class="insp-label insp-label--inline" for="ib-keep">
-                Mantener junto
-                <span class="insp-hint">Evita cortar el bloque entre páginas.</span>
-              </label>
-              <input
-                id="ib-keep"
-                type="checkbox"
-                class="insp-checkbox"
-                bind:checked={insp_bKeepTogether}
-                onchange={() => { markInspectorDirty(); onInspectorBlur(); }}
-              />
-            </div>
-
-            <div class="insp-field insp-field--inline">
               <label class="insp-label insp-label--inline" for="ib-brbefore">
                 Salto antes
               </label>

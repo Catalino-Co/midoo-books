@@ -43,16 +43,19 @@ declare module '$env/static/private' {
 	export const ChocolateyInstall: string;
 	export const ChocolateyLastPathUpdate: string;
 	export const CHROME_CRASHPAD_PIPE_NAME: string;
-	export const CODEX_SHELL: string;
 	export const COLOR: string;
 	export const COLORTERM: string;
 	export const CommonProgramFiles: string;
 	export const CommonProgramW6432: string;
 	export const COMPUTERNAME: string;
 	export const ComSpec: string;
-	export const DISABLE_AUTO_UPDATE: string;
 	export const DriverData: string;
 	export const EDITOR: string;
+	export const EFC_35300_1262719628: string;
+	export const EFC_35300_1592913036: string;
+	export const EFC_35300_2283032206: string;
+	export const EFC_35300_2775293581: string;
+	export const EFC_35300_3789132940: string;
 	export const FORCE_COLOR: string;
 	export const GIT_ASKPASS: string;
 	export const HOME: string;
@@ -107,7 +110,7 @@ declare module '$env/static/private' {
 	export const PROMPT: string;
 	export const PSModulePath: string;
 	export const PUBLIC: string;
-	export const SHELL: string;
+	export const SESSIONNAME: string;
 	export const SystemDrive: string;
 	export const SystemRoot: string;
 	export const TEMP: string;
@@ -121,14 +124,11 @@ declare module '$env/static/private' {
 	export const VSCODE_GIT_ASKPASS_EXTRA_ARGS: string;
 	export const VSCODE_GIT_ASKPASS_MAIN: string;
 	export const VSCODE_GIT_ASKPASS_NODE: string;
+	export const VSCODE_GIT_IPC_AUTH_TOKEN: string;
 	export const VSCODE_GIT_IPC_HANDLE: string;
 	export const VSCODE_INJECTION: string;
-	export const VSCODE_PYTHON_AUTOACTIVATE_GUARD: string;
 	export const windir: string;
 	export const ZES_ENABLE_SYSMAN: string;
-	export const ZSH_TMUX_AUTOSTART: string;
-	export const ZSH_TMUX_AUTOSTARTED: string;
-	export const __COMPAT_LAYER: string;
 }
 
 /**
@@ -220,16 +220,19 @@ declare module '$env/dynamic/private' {
 		ChocolateyInstall: string;
 		ChocolateyLastPathUpdate: string;
 		CHROME_CRASHPAD_PIPE_NAME: string;
-		CODEX_SHELL: string;
 		COLOR: string;
 		COLORTERM: string;
 		CommonProgramFiles: string;
 		CommonProgramW6432: string;
 		COMPUTERNAME: string;
 		ComSpec: string;
-		DISABLE_AUTO_UPDATE: string;
 		DriverData: string;
 		EDITOR: string;
+		EFC_35300_1262719628: string;
+		EFC_35300_1592913036: string;
+		EFC_35300_2283032206: string;
+		EFC_35300_2775293581: string;
+		EFC_35300_3789132940: string;
 		FORCE_COLOR: string;
 		GIT_ASKPASS: string;
 		HOME: string;
@@ -284,7 +287,7 @@ declare module '$env/dynamic/private' {
 		PROMPT: string;
 		PSModulePath: string;
 		PUBLIC: string;
-		SHELL: string;
+		SESSIONNAME: string;
 		SystemDrive: string;
 		SystemRoot: string;
 		TEMP: string;
@@ -298,14 +301,11 @@ declare module '$env/dynamic/private' {
 		VSCODE_GIT_ASKPASS_EXTRA_ARGS: string;
 		VSCODE_GIT_ASKPASS_MAIN: string;
 		VSCODE_GIT_ASKPASS_NODE: string;
+		VSCODE_GIT_IPC_AUTH_TOKEN: string;
 		VSCODE_GIT_IPC_HANDLE: string;
 		VSCODE_INJECTION: string;
-		VSCODE_PYTHON_AUTOACTIVATE_GUARD: string;
 		windir: string;
 		ZES_ENABLE_SYSMAN: string;
-		ZSH_TMUX_AUTOSTART: string;
-		ZSH_TMUX_AUTOSTARTED: string;
-		__COMPAT_LAYER: string;
 		[key: `PUBLIC_${string}`]: undefined;
 		[key: `${string}`]: string | undefined;
 	}

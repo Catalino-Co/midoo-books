@@ -5,7 +5,7 @@
 
 import type { LayoutSettings } from '$lib/core/domain/layout';
 import { DEFAULT_LAYOUT_SETTINGS } from '$lib/core/domain/layout';
-import { getPageContentBoxMm } from './document-page-geometry';
+import { getPageContentBoxMm, pageDimensionsMm } from './document-page-geometry';
 import type { LayoutEngineMetrics, PageSpreadSide } from './page-layout-model';
 import { resolveBookStyles } from './book-styles';
 
@@ -23,15 +23,14 @@ function referenceLayoutSettings(): LayoutSettings {
 const REF_SIDE: PageSpreadSide = 'right';
 const REF_CONTENT_BOX = getPageContentBoxMm(referenceLayoutSettings(), REF_SIDE);
 
-const REF_UNITS_HEIGHT = 540;
-const REF_UNITS_WIDTH = 396;
 const REF_CHARS_PER_LINE = 58;
-const PREVIEW_FLOW_PAD_TOP_MM = 14;
-const PREVIEW_FLOW_PAD_BOTTOM_MM = 18;
-const PREVIEW_FLOW_PAD_X_MM = 22;
+const DEFAULT_PREVIEW_PAGE_WIDTH_PX = 440;
+export const PREVIEW_FLOW_PAD_TOP_MM = 14;
+export const PREVIEW_FLOW_PAD_BOTTOM_MM = 8;
+export const PREVIEW_FLOW_PAD_X_MM = 22;
 const PREVIEW_RAIL_MM = 14;
-const PREVIEW_FOOTER_MM = 13;
-const PREVIEW_HEADER_MM = 6;
+const PREVIEW_FOOTER_MM = 8;
+const PREVIEW_HEADER_MM = 4;
 
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
@@ -65,18 +64,24 @@ export function getEngineContentBoxMm(settings: LayoutSettings): {
 }
 
 export function computeLayoutEngineMetrics(settings: LayoutSettings): LayoutEngineMetrics {
+  return computeLayoutEngineMetricsForPreviewWidth(settings, DEFAULT_PREVIEW_PAGE_WIDTH_PX);
+}
+
+export function computeLayoutEngineMetricsForPreviewWidth(
+  settings: LayoutSettings,
+  pageSheetWidthPx: number,
+): LayoutEngineMetrics {
   const { contentWidthMm, contentHeightMm } = getEngineContentBoxMm(settings);
   const paragraphStyle = resolveBookStyles(settings).PARAGRAPH;
+  const { widthMm: pageWidthMm } = pageDimensionsMm(settings);
+  const pxPerMm = Math.max(1, pageSheetWidthPx) / Math.max(1e-6, pageWidthMm);
 
-  const scaleH = contentHeightMm / REF_CONTENT_BOX.contentHeightMm;
-  const scaleW = contentWidthMm / REF_CONTENT_BOX.contentWidthMm;
-
-  const pageBodyHeightUnits = Math.round(clamp(REF_UNITS_HEIGHT * scaleH, 320, 1400));
-  const pageBodyWidthUnits = Math.round(clamp(REF_UNITS_WIDTH * scaleW, 240, 980));
+  const pageBodyHeightUnits = Math.round(clamp(contentHeightMm * pxPerMm, 220, 1800));
+  const pageBodyWidthUnits = Math.round(clamp(contentWidthMm * pxPerMm, 120, 1200));
 
   const chars = Math.round(
     REF_CHARS_PER_LINE
-      * (REF_CONTENT_BOX.contentWidthMm / Math.max(20, contentWidthMm))
+      * (contentWidthMm / Math.max(20, REF_CONTENT_BOX.contentWidthMm))
       * (DEFAULT_LAYOUT_SETTINGS.bodyFontSize / Math.max(8, paragraphStyle.fontSize)),
   );
 

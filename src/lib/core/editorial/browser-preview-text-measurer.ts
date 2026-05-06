@@ -10,17 +10,6 @@ import type {
 } from './page-layout-engine';
 
 const PT_TO_PX = 96 / 72;
-const SOFT_BREAK_RE = /[,;—–)]$/;
-const SENTENCE_END_RE = /[.!?…:"')\]]$/;
-const BREAK_SCAN_BACK_WORDS = 24;
-
-function breakScore(text: string): number {
-  const trimmed = text.trim();
-  if (!trimmed) return 4;
-  if (SENTENCE_END_RE.test(trimmed)) return 3;
-  if (SOFT_BREAK_RE.test(trimmed)) return 2;
-  return 0;
-}
 
 function marginTopPx(style: BookStyleDefinition, continuedFromPreviousPage: boolean): number {
   return continuedFromPreviousPage ? 0 : style.marginTop * PT_TO_PX;
@@ -114,59 +103,41 @@ export class BrowserPreviewTextMeasurer implements LayoutTextMeasurementAdapter 
     }
 
     if (bestFitWords <= 0 || bestFitWords >= words.length) return null;
+    for (let candidateWords = bestFitWords; candidateWords >= 1; candidateWords--) {
+      if (candidateWords >= words.length) continue;
+      const firstText = words.slice(0, candidateWords).join(' ');
+      const restText = words.slice(candidateWords).join(' ');
+      if (!restText) continue;
 
-    let bestCandidate: {
-      wordCount: number;
-      fragmentMeasure: ReturnType<BrowserPreviewTextMeasurer['measureElement']>;
-      score: number;
-    } | null = null;
-
-    for (let candidate = bestFitWords; candidate >= 1; candidate--) {
-      if (bestFitWords - candidate > BREAK_SCAN_BACK_WORDS && bestCandidate) break;
-
-      const first = words.slice(0, candidate).join(' ');
-      const rest = words.slice(candidate).join(' ');
-      if (!rest.trim()) continue;
-
-      const fragmentMeasure = this.measureElement(
+      const firstMeasure = this.measureElement(
         'PARAGRAPH',
-        first,
+        firstText,
         input.style,
         input.continuedFromPreviousPage,
         true,
       );
-      if (fragmentMeasure.totalHeightPx > input.availableUnits) continue;
+      if (firstMeasure.totalHeightPx > input.availableUnits) continue;
+      if (firstMeasure.lineCount < input.minLinesAtPageBottom) continue;
 
       const restMeasure = this.measureElement(
         'PARAGRAPH',
-        rest,
+        restText,
         input.style,
         true,
         false,
       );
-      if (fragmentMeasure.lineCount < input.minLinesAtPageBottom) continue;
       if (restMeasure.lineCount < input.minLinesAtPageTop) continue;
 
-      const score = breakScore(first);
-      if (
-        !bestCandidate
-        || score > bestCandidate.score
-        || (score === bestCandidate.score && candidate > bestCandidate.wordCount)
-      ) {
-        bestCandidate = { wordCount: candidate, fragmentMeasure, score };
-        if (score >= 3 && bestFitWords - candidate >= 2) break;
-      }
+      return {
+        first: firstText,
+        rest: restText,
+        measuredUnits: Math.ceil(firstMeasure.totalHeightPx),
+        fragmentLineCount: firstMeasure.lineCount,
+        widowOrphanAdjusted: candidateWords !== bestFitWords,
+      };
     }
 
-    if (!bestCandidate) return null;
-
-    return {
-      first: words.slice(0, bestCandidate.wordCount).join(' '),
-      rest: words.slice(bestCandidate.wordCount).join(' '),
-      measuredUnits: Math.ceil(bestCandidate.fragmentMeasure.totalHeightPx),
-      fragmentLineCount: bestCandidate.fragmentMeasure.lineCount,
-      widowOrphanAdjusted: bestCandidate.wordCount !== bestFitWords,
-    };
+    return null;
   }
 
   private measureElement(
@@ -189,8 +160,9 @@ export class BrowserPreviewTextMeasurer implements LayoutTextMeasurementAdapter 
     element.style.boxSizing = 'border-box';
     element.style.width = '100%';
     element.style.whiteSpace = 'pre-wrap';
-    element.style.overflowWrap = 'break-word';
+    element.style.overflowWrap = 'normal';
     element.style.wordBreak = 'normal';
+    element.style.hyphens = 'none';
     element.style.fontFamily = "'Georgia', 'Times New Roman', serif";
     element.style.fontSize = `${style.fontSize}pt`;
     element.style.lineHeight = String(style.lineHeight);
