@@ -624,6 +624,10 @@
     if (!selectedBlockId || inspectorSaving) return;
     inspectorSaving = true;
     inspectorError  = null;
+    // Marcar clean ANTES del await para que cualquier markInspectorDirty()
+    // que llegue DURANTE el guardado sea detectable al terminar.
+    cancelAutoSave();
+    inspectorDirty = false;
     try {
       const prev      = blocks.find(b => b.id === selectedBlockId);
       const layoutMeta = mergeLayoutIntoMetadata(prev?.metadataJson ?? null, {
@@ -671,12 +675,15 @@
       });
       if (updated) {
         blocks = blocks.map(b => b.id === updated.id ? updated : b);
-        resetInspectorDirty();
         inspectorSaveOk = true;
         setTimeout(() => (inspectorSaveOk = false), 2500);
+        // Si llegaron cambios nuevos mientras guardábamos, programar otro guardado.
+        if (inspectorDirty) scheduleAutoSave();
       }
     } catch (e) {
       inspectorError = e instanceof Error ? e.message : String(e);
+      // Restaurar dirty para que el usuario pueda reintentar.
+      inspectorDirty = true;
     } finally {
       inspectorSaving = false;
     }
