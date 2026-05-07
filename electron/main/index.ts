@@ -37,7 +37,7 @@ protocol.registerSchemesAsPrivileged([
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
 // URL del servidor de desarrollo de Vite
-const DEV_URL = 'http://localhost:5173';
+const DEV_URL = 'http://localhost:5178';
 
 let mainWindow: BrowserWindow | null = null;
 

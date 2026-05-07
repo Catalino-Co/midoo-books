@@ -4,11 +4,12 @@
  * IPC handlers para el módulo de exportación de MIDOO Books.
  *
  * Canales:
- *   exports:create       — Crea un registro ExportJob (status: pending)
- *   exports:update       — Actualiza status/outputPath/errorMsg de un job
- *   exports:listByBook   — Lista los últimos N jobs de un libro
- *   exports:renderPdf    — Abre ventana oculta, espera Paged.js, captura PDF
- *   exports:saveFile     — Guarda un Buffer en disco con dialog nativo
+ *   exports:create        — Crea un registro ExportJob (status: pending)
+ *   exports:update        — Actualiza status/outputPath/errorMsg de un job
+ *   exports:listByBook    — Lista los últimos N jobs de un libro
+ *   exports:clearHistory  — Borra todos los jobs de un libro
+ *   exports:renderPdf     — Abre ventana oculta, espera Paged.js, captura PDF
+ *   exports:saveFile      — Guarda un Buffer en disco con dialog nativo
  */
 
 import { ipcMain, dialog, BrowserWindow } from 'electron';
@@ -21,7 +22,7 @@ import type { CreateExportJobInput, UpdateExportJobInput } from '../../../src/li
 
 interface PdfRenderOptions {
   format: 'screen' | 'print';
-  /** URL base del devServer o app. Ej: http://localhost:5173 */
+  /** URL base del devServer o app. Ej: http://localhost:5178 */
   baseUrl: string;
 }
 
@@ -66,6 +67,10 @@ export function registerExportHandlers(): void {
 
   ipcMain.handle('exports:listByBook', (_e, bookId: string, limit?: number) =>
     safe(() => ExportRepo.listExportJobsByBook(bookId, limit ?? 10)),
+  );
+
+  ipcMain.handle('exports:clearHistory', (_e, bookId: string) =>
+    safe(() => ExportRepo.clearExportJobsByBook(bookId)),
   );
 
   // PDF via printToPDF ──────────────────────────────────────────────────────────

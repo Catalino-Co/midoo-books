@@ -3,7 +3,7 @@
   import { onMount } from 'svelte';
   import {
     exportPdf, exportMarkdown, exportEpub, exportDocx,
-    createExportJob, updateExportJob, listExportJobs,
+    createExportJob, updateExportJob, listExportJobs, clearExportHistory,
   } from '$lib/services/export.service';
   import type { ExportJob, ExportType } from '$lib/core/domain/export';
 
@@ -18,6 +18,8 @@
   let exporting = $state(false);
   let statusMsg = $state<{ kind: 'success' | 'error' | 'info'; text: string } | null>(null);
   let history = $state<ExportJob[]>([]);
+  let confirmClearHistory = $state(false);
+  let clearingHistory = $state(false);
 
   // ── Format catalog ────────────────────────────────────────────────────────
 
@@ -73,6 +75,19 @@
     try {
       history = await listExportJobs(bookId, 10);
     } catch { /* silencioso */ }
+  }
+
+  async function doClearHistory() {
+    if (clearingHistory) return;
+    clearingHistory = true;
+    confirmClearHistory = false;
+    try {
+      await clearExportHistory(bookId);
+      history = [];
+    } catch { /* silencioso */ }
+    finally {
+      clearingHistory = false;
+    }
   }
 
   onMount(() => { void loadHistory(); });
@@ -240,7 +255,43 @@
   <!-- History -->
   {#if history.length > 0}
     <section class="history">
-      <h2 class="history-title">Historial reciente</h2>
+      <div class="history-header">
+        <h2 class="history-title">Historial reciente</h2>
+        {#if confirmClearHistory}
+          <div class="history-confirm-clear">
+            <span class="history-confirm-text">¿Limpiar todo el historial?</span>
+            <button
+              type="button"
+              class="history-confirm-btn history-confirm-btn--yes"
+              onclick={doClearHistory}
+              disabled={clearingHistory}
+            >
+              {clearingHistory ? 'Limpiando…' : 'Sí, limpiar'}
+            </button>
+            <button
+              type="button"
+              class="history-confirm-btn history-confirm-btn--no"
+              onclick={() => (confirmClearHistory = false)}
+              disabled={clearingHistory}
+            >
+              Cancelar
+            </button>
+          </div>
+        {:else}
+          <button
+            type="button"
+            class="history-clear-btn"
+            onclick={() => (confirmClearHistory = true)}
+            title="Limpiar historial de exportaciones"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14H6L5 6M10 11v6M14 11v6M9 6V4h6v2"/>
+            </svg>
+            Limpiar
+          </button>
+        {/if}
+      </div>
       <ul class="history-list">
         {#each history as job (job.id)}
           <li class="history-item">
@@ -469,14 +520,78 @@
     padding-top: 20px;
   }
 
+  .history-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
   .history-title {
-    margin: 0 0 12px;
+    margin: 0;
     font-size: 13px;
     font-weight: 700;
     color: rgba(255, 255, 255, 0.45);
     text-transform: uppercase;
     letter-spacing: 0.06em;
+    flex: 1;
   }
+
+  .history-clear-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: 5px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: transparent;
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+  }
+  .history-clear-btn:hover {
+    background: rgba(220, 70, 70, 0.1);
+    color: #e07070;
+    border-color: rgba(220, 80, 80, 0.3);
+  }
+
+  .history-confirm-clear {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .history-confirm-text {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .history-confirm-btn {
+    padding: 3px 10px;
+    border-radius: 5px;
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 0.12s;
+  }
+  .history-confirm-btn:disabled { opacity: 0.5; cursor: default; }
+
+  .history-confirm-btn--yes {
+    background: rgba(220, 70, 70, 0.8);
+    color: #fff;
+    border-color: rgba(220, 70, 70, 0.5);
+  }
+  .history-confirm-btn--yes:hover:not(:disabled) { background: #dc4646; }
+
+  .history-confirm-btn--no {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.5);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+  .history-confirm-btn--no:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); }
 
   .history-list {
     list-style: none;

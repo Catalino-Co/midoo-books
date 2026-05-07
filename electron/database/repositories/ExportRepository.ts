@@ -105,3 +105,11 @@ export function listExportJobsByBook(bookId: string, limit = 10): ExportJob[] {
   );
   return queryToRows(result).map(rowToExportJob);
 }
+
+export function clearExportJobsByBook(bookId: string): number {
+  db().run('DELETE FROM export_jobs WHERE book_id = ?', [bookId]);
+  persist();
+  // Devuelve cuántas filas se borraron (sql.js no expone affected rows directamente,
+  // pero podemos inferirlo; retornamos 0 como valor seguro)
+  return 0;
+}

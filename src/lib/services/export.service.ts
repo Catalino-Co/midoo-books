@@ -68,6 +68,10 @@ export function listExportJobs(bookId: string, limit = 10): Promise<ExportJob[]>
   return getPlatformAdapter().listExportJobsByBook(bookId, limit);
 }
 
+export function clearExportHistory(bookId: string): Promise<void> {
+  return getPlatformAdapter().clearExportHistory(bookId);
+}
+
 // ─── Markdown ─────────────────────────────────────────────────────────────────
 
 export async function exportMarkdown(

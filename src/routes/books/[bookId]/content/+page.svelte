@@ -2253,6 +2253,20 @@
             <span class="insp-meta-row"><span class="insp-meta-key">Posición</span><span class="insp-meta-val">#{selectedBlock.orderIndex + 1}</span></span>
           </div>
 
+          <div class="insp-divider"></div>
+          <button
+            type="button"
+            class="btn btn--danger-ghost btn--full insp-delete-block-btn"
+            onclick={() => (confirmDeleteBlock = selectedBlock)}
+            disabled={deleting}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14H6L5 6M10 11v6M14 11v6M9 6V4h6v2"/>
+            </svg>
+            Eliminar bloque
+          </button>
+
           {:else}
           <!-- ── Tab: Formato ── -->
 
@@ -4341,6 +4355,26 @@
 
   .btn--danger { background: rgba(220,70,70,0.85); color: #fff; }
   .btn--danger:hover:not(:disabled) { background: #dc4646; }
+
+  .btn--danger-ghost {
+    background: transparent;
+    color: rgba(220,100,100,0.7);
+    border: 1px solid rgba(220,80,80,0.2);
+  }
+  .btn--danger-ghost:hover:not(:disabled) {
+    background: rgba(220,70,70,0.1);
+    color: #e07070;
+    border-color: rgba(220,80,80,0.4);
+  }
+
+  .insp-delete-block-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    margin-top: 4px;
+    font-size: 12px;
+  }
 
   /* Icon buttons */
   .icon-btn {

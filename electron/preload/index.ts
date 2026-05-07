@@ -83,11 +83,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── Exportación ───────────────────────────────────────────────────────────
   exports: {
-    create:      (input)                    => ipcRenderer.invoke('exports:create', input),
-    update:      (id, updates)              => ipcRenderer.invoke('exports:update', id, updates),
-    listByBook:  (bookId, limit)            => ipcRenderer.invoke('exports:listByBook', bookId, limit),
-    renderPdf:   (bookId, opts)             => ipcRenderer.invoke('exports:renderPdf', bookId, opts),
-    saveFile:    (buffer, name, filters)    => ipcRenderer.invoke('exports:saveFile', buffer, name, filters),
+    create:        (input)                    => ipcRenderer.invoke('exports:create', input),
+    update:        (id, updates)              => ipcRenderer.invoke('exports:update', id, updates),
+    listByBook:    (bookId, limit)            => ipcRenderer.invoke('exports:listByBook', bookId, limit),
+    clearHistory:  (bookId)                   => ipcRenderer.invoke('exports:clearHistory', bookId),
+    renderPdf:     (bookId, opts)             => ipcRenderer.invoke('exports:renderPdf', bookId, opts),
+    saveFile:      (buffer, name, filters)    => ipcRenderer.invoke('exports:saveFile', buffer, name, filters),
   },
 
 });

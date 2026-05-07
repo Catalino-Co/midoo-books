@@ -87,6 +87,7 @@ export interface IPlatformAdapter {
   createExportJob(input: CreateExportJobInput):                                                          Promise<ExportJob>;
   updateExportJob(id: string, updates: UpdateExportJobInput):                                            Promise<ExportJob | null>;
   listExportJobsByBook(bookId: string, limit?: number):                                                  Promise<ExportJob[]>;
+  clearExportHistory(bookId: string):                                                                    Promise<void>;
   renderBookPdf(bookId: string, opts: { format: 'screen' | 'print'; baseUrl: string }):                 Promise<Buffer>;
   saveExportFile(buffer: Buffer, name: string, filters: { name: string; extensions: string[] }[]):      Promise<{ success: boolean; path?: string; canceled?: boolean }>;
 }

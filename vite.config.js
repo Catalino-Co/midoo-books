@@ -4,6 +4,11 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   plugins: [sveltekit()],
 
+  server: {
+    port: 5178,
+    strictPort: true,
+  },
+
   optimizeDeps: {
     // Incluir pagedjs en el pre-bundle de Vite (esbuild).
     // Esto convierte sus dependencias CJS (como event-emitter) a ESM

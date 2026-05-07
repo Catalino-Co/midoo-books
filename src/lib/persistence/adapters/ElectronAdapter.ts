@@ -204,6 +204,10 @@ export class ElectronAdapter implements IPlatformAdapter {
     return unwrap(await this.api.exports.listByBook(bookId, limit));
   }
 
+  async clearExportHistory(bookId: string): Promise<void> {
+    await this.api.exports.clearHistory(bookId);
+  }
+
   async renderBookPdf(bookId: string, opts: { format: 'screen' | 'print'; baseUrl: string }): Promise<Buffer> {
     return unwrap(await this.api.exports.renderPdf(bookId, opts));
   }
