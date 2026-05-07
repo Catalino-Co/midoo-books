@@ -17,12 +17,13 @@
  *   3. Importar y llamar aquí
  */
 
-import { registerAppHandlers }   from './handlers/app.handlers';
-import { registerDbHandlers }    from './handlers/db.handlers';
-import { registerFsHandlers }    from './handlers/fs.handlers';
-import { registerBooksHandlers } from './handlers/books.handlers';
-import { registerAssetHandlers } from './handlers/assets.handlers';
+import { registerAppHandlers }    from './handlers/app.handlers';
+import { registerDbHandlers }     from './handlers/db.handlers';
+import { registerFsHandlers }     from './handlers/fs.handlers';
+import { registerBooksHandlers }  from './handlers/books.handlers';
+import { registerAssetHandlers }  from './handlers/assets.handlers';
 import { registerLayoutHandlers } from './handlers/layout.handlers';
+import { registerExportHandlers } from './handlers/exports.handlers';
 
 export function registerAllHandlers(): void {
   registerAppHandlers();
@@ -31,6 +32,7 @@ export function registerAllHandlers(): void {
   registerBooksHandlers();
   registerAssetHandlers();
   registerLayoutHandlers();
+  registerExportHandlers();
 
   console.log('[IPC] Todos los handlers registrados.');
 }

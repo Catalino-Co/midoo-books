@@ -17,12 +17,14 @@ export type ExportJobId = string & { readonly [ExportJobIdBrand]: never };
 
 /**
  * Formato de salida del export.
- * - pdf:  Via Paged.js + window.print() (Fase 2)
- * - epub: ePub 3.x (futuro)
- * - odt:  OpenDocument Text (futuro)
- * - html: HTML estático (futuro)
+ * - pdf_screen: PDF para pantalla / ebook (Paged.js + printToPDF, color, 6×9")
+ * - pdf_print:  PDF para imprenta (márgenes físicos, bleed, tamaño real)
+ * - epub:       ePub 3 reflowable + NCX para compatibilidad EPUB 2
+ * - markdown:   Markdown estructurado con frontmatter YAML
+ * - docx:       Microsoft Word (.docx)
+ * — Legacy: pdf | odt | html — alias internos, no expuestos en UI v1
  */
-export type ExportType = 'pdf' | 'epub' | 'odt' | 'html';
+export type ExportType = 'pdf_screen' | 'pdf_print' | 'epub' | 'markdown' | 'docx' | 'pdf' | 'odt' | 'html';
 
 /**
  * Estado del proceso de exportación.

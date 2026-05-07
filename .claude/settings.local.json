@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx svelte-check *)",
+      "Bash(grep -v \"content\\\\\\\\\\\\\\\\+page.svelte\")",
+      "Bash(node scripts/build-electron.mjs)"
+    ]
+  }
+}

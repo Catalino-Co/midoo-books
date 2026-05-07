@@ -273,4 +273,21 @@ export class WebAdapter implements IPlatformAdapter {
   importAssetFiles(_bookId: string, _paths: string[]): Promise<Asset[]> {
     return Promise.reject(new Error('WebAdapter: assets solo en Electron (PARTE 8).'));
   }
+
+  // ── Exportación (no soportado en web) ────────────────────────────────────
+  createExportJob(_input: import('$lib/core/domain/export').CreateExportJobInput): Promise<import('$lib/core/domain/export').ExportJob> {
+    return Promise.reject(new Error('WebAdapter: exportación solo en Electron.'));
+  }
+  updateExportJob(_id: string, _updates: import('$lib/core/domain/export').UpdateExportJobInput): Promise<import('$lib/core/domain/export').ExportJob | null> {
+    return Promise.reject(new Error('WebAdapter: exportación solo en Electron.'));
+  }
+  listExportJobsByBook(_bookId: string, _limit?: number): Promise<import('$lib/core/domain/export').ExportJob[]> {
+    return Promise.resolve([]);
+  }
+  renderBookPdf(_bookId: string, _opts: { format: 'screen' | 'print'; baseUrl: string }): Promise<Buffer> {
+    return Promise.reject(new Error('WebAdapter: PDF solo en Electron.'));
+  }
+  saveExportFile(_buffer: Buffer, _name: string, _filters: { name: string; extensions: string[] }[]): Promise<{ success: boolean; path?: string; canceled?: boolean }> {
+    return Promise.reject(new Error('WebAdapter: guardar archivo solo en Electron.'));
+  }
 }

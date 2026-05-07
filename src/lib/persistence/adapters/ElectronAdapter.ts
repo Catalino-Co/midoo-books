@@ -25,6 +25,9 @@ import type {
   UpdateBlockInput,
   Asset,
   UpdateAssetInput,
+  ExportJob,
+  CreateExportJobInput,
+  UpdateExportJobInput,
 } from '$lib/core/domain/index';
 
 /** Lanza una excepción si la respuesta IPC contiene un campo 'error'. */
@@ -183,5 +186,33 @@ export class ElectronAdapter implements IPlatformAdapter {
     const res = await this.api.assets.importPaths(bookId, paths);
     if (res && 'error' in res) throw new Error((res as { error: string }).error);
     return (res as { imported: Asset[] }).imported;
+  }
+
+  // ── Exportación ───────────────────────────────────────────────────────────
+
+  async createExportJob(input: CreateExportJobInput): Promise<ExportJob> {
+    return unwrap(await this.api.exports.create(input));
+  }
+
+  async updateExportJob(id: string, updates: UpdateExportJobInput): Promise<ExportJob | null> {
+    const res = await this.api.exports.update(id, updates);
+    if (res && 'error' in res) throw new Error((res as { error: string }).error);
+    return res as ExportJob | null;
+  }
+
+  async listExportJobsByBook(bookId: string, limit?: number): Promise<ExportJob[]> {
+    return unwrap(await this.api.exports.listByBook(bookId, limit));
+  }
+
+  async renderBookPdf(bookId: string, opts: { format: 'screen' | 'print'; baseUrl: string }): Promise<Buffer> {
+    return unwrap(await this.api.exports.renderPdf(bookId, opts));
+  }
+
+  async saveExportFile(
+    buffer: Buffer,
+    name: string,
+    filters: { name: string; extensions: string[] }[],
+  ): Promise<{ success: boolean; path?: string; canceled?: boolean }> {
+    return unwrap(await this.api.exports.saveFile(buffer, name, filters));
   }
 }

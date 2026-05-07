@@ -20,6 +20,9 @@ import type {
   UpdateBlockInput,
   Asset,
   UpdateAssetInput,
+  ExportJob,
+  CreateExportJobInput,
+  UpdateExportJobInput,
 } from '$lib/core/domain/index';
 
 declare global {
@@ -93,6 +96,14 @@ declare global {
         delete(id: string):                                       Promise<{ deleted: boolean } | { error: string }>;
         pickAndImport(bookId: string):                            Promise<{ imported: Asset[] } | { error: string }>;
         importPaths(bookId: string, paths: string[]):            Promise<{ imported: Asset[] } | { error: string }>;
+      };
+
+      exports: {
+        create(input: CreateExportJobInput):                                                           Promise<ExportJob | { error: string }>;
+        update(id: string, updates: UpdateExportJobInput):                                             Promise<ExportJob | null | { error: string }>;
+        listByBook(bookId: string, limit?: number):                                                    Promise<ExportJob[] | { error: string }>;
+        renderPdf(bookId: string, opts: { format: 'screen' | 'print'; baseUrl: string }):             Promise<Buffer | { error: string }>;
+        saveFile(buffer: Buffer, name: string, filters: { name: string; extensions: string[] }[]):    Promise<{ success: boolean; path?: string; canceled?: boolean } | { error: string }>;
       };
     };
   }

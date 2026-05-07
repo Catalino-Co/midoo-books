@@ -20,6 +20,7 @@
  *   v8 — Numeración editorial en layout_settings (PARTE 10)
  *   v9 — Formato físico: preset, bleed, safe area (PARTE 13)
  *   v10 — styles_json en layout_settings (módulo Estilos)
+ *   v11 — export_jobs: CHECK ampliado para pdf_screen, pdf_print, markdown, docx
  */
 
 import type { Database } from 'sql.js';
@@ -728,6 +729,43 @@ const migrations: Migration[] = [
       `);
 
       console.log('[DB] v10: layout_settings — styles_json para estilos globales.');
+    },
+  },
+
+  // ─── v11: export_jobs — ampliar export_type para nuevos formatos ─────────
+  {
+    version: 11,
+    name: 'export_jobs_new_types',
+    up(db) {
+      // SQLite no permite ALTER TABLE ... MODIFY COLUMN ni DROP CONSTRAINT.
+      // Recreamos la tabla con el CHECK ampliado y migramos los datos.
+      db.run(`
+        CREATE TABLE IF NOT EXISTS export_jobs_v11 (
+          id           TEXT PRIMARY KEY,
+          book_id      TEXT NOT NULL REFERENCES book_projects(id) ON DELETE CASCADE,
+          export_type  TEXT NOT NULL DEFAULT 'pdf'
+                         CHECK(export_type IN ('pdf','epub','odt','html','pdf_screen','pdf_print','markdown','docx')),
+          status       TEXT NOT NULL DEFAULT 'pending'
+                         CHECK(status IN ('pending','running','completed','failed')),
+          options_json TEXT,
+          output_path  TEXT,
+          error_msg    TEXT,
+          created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+          completed_at TEXT
+        )
+      `);
+      db.run(`INSERT INTO export_jobs_v11 SELECT * FROM export_jobs`);
+      db.run(`DROP TABLE export_jobs`);
+      db.run(`ALTER TABLE export_jobs_v11 RENAME TO export_jobs`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_exports_book_id ON export_jobs(book_id, created_at DESC)`);
+
+      db.run(`
+        INSERT OR REPLACE INTO app_settings (key, value) VALUES
+          ('appVersion',    '0.11.0'),
+          ('schemaVersion', '11')
+      `);
+
+      console.log('[DB] v11: export_jobs — nuevos export_type: pdf_screen, pdf_print, markdown, docx.');
     },
   },
 

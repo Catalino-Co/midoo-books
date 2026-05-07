@@ -47,7 +47,7 @@
     { id: 'styles',   label: 'Estilos',      icon: '🎨',  implemented: true },
     { id: 'layout',   label: 'Maqueta',      icon: '📐',  implemented: true },
     { id: 'preview',  label: 'Vista previa', icon: '👁️',  implemented: true },
-    { id: 'export',   label: 'Exportar',     icon: '📤',  implemented: false },
+    { id: 'export',   label: 'Exportar',     icon: '📤',  implemented: true },
   ] as const;
 </script>
 

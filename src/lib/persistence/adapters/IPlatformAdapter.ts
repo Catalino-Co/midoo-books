@@ -21,6 +21,9 @@ import type {
   UpdateBlockInput,
   Asset,
   UpdateAssetInput,
+  ExportJob,
+  CreateExportJobInput,
+  UpdateExportJobInput,
 } from '$lib/core/domain/index';
 
 /** Respuesta genérica de un error IPC serializado. */
@@ -79,4 +82,11 @@ export interface IPlatformAdapter {
   /** Diálogo nativo: importa una o varias imágenes al libro. */
   pickAndImportAssets(bookId: string):                    Promise<Asset[]>;
   importAssetFiles(bookId: string, paths: string[]):     Promise<Asset[]>;
+
+  // ── Exportación ───────────────────────────────────────────────────────────
+  createExportJob(input: CreateExportJobInput):                                                          Promise<ExportJob>;
+  updateExportJob(id: string, updates: UpdateExportJobInput):                                            Promise<ExportJob | null>;
+  listExportJobsByBook(bookId: string, limit?: number):                                                  Promise<ExportJob[]>;
+  renderBookPdf(bookId: string, opts: { format: 'screen' | 'print'; baseUrl: string }):                 Promise<Buffer>;
+  saveExportFile(buffer: Buffer, name: string, filters: { name: string; extensions: string[] }[]):      Promise<{ success: boolean; path?: string; canceled?: boolean }>;
 }

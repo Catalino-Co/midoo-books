@@ -10,3 +10,4 @@ export * as SectionRepo from './SectionRepository';
 export * as BlockRepo   from './BlockRepository';
 export * as AssetRepo   from './AssetRepository';
 export * as LayoutRepo  from './LayoutRepository';
+export * as ExportRepo  from './ExportRepository';
