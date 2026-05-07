@@ -302,8 +302,8 @@
   });
 
   $effect(() => {
-    if (selectedSectionId && blocks.length >= 0) {
-      sectionBlockCounts = { ...sectionBlockCounts, [selectedSectionId]: blocks.length };
+    if (selectedSectionId) {
+      sectionBlockCounts[selectedSectionId] = blocks.length;
     }
   });
 
