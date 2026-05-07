@@ -121,6 +121,7 @@
   let addingBlock            = $state(false);
   let showBlockPalette       = $state(false);
   let focusMode              = $state(false);
+  let inspectorTab           = $state<'block' | 'format'>('block');
 
   // ── Drag & drop ───────────────────────────────────────────────────────────
   let dragSectionId          = $state<string | null>(null);
@@ -439,6 +440,7 @@
     selectedBlockId = id;
     const block = blocks.find(b => b.id === id);
     if (block) syncBlockToInspector(block);
+    inspectorTab = 'block';
     resetInspectorDirty();
   }
 
@@ -1825,6 +1827,16 @@
                   {/if}
                 </section>
               {/each}
+              <!-- Botón fijo al final de la lista -->
+              <div class="manuscript-append-row">
+                <button
+                  type="button"
+                  class="manuscript-append-btn"
+                  title="Añadir bloque al final"
+                  disabled={addingBlock}
+                  onclick={() => insertGapAtIndex(blocks.length)}
+                >+</button>
+              </div>
             </article>
           </div>
         {/if}
@@ -1971,6 +1983,13 @@
             ← Propiedades de la sección
           </button>
 
+          <div class="insp-tab-bar">
+            <button type="button" class="insp-tab" class:insp-tab--active={inspectorTab === 'block'} onclick={() => (inspectorTab = 'block')}>Bloque</button>
+            <button type="button" class="insp-tab" class:insp-tab--active={inspectorTab === 'format'} onclick={() => (inspectorTab = 'format')}>Formato</button>
+          </div>
+
+          {#if inspectorTab === 'block'}
+
           <div class="insp-field">
             <label class="insp-label" for="ib-type">Tipo de bloque</label>
             <select
@@ -1984,39 +2003,6 @@
               {/each}
             </select>
           </div>
-
-          {#if selectedBlockStyleInfo}
-            <div class="insp-preset-card insp-preset-card--style-role">
-              <div class="insp-preset-title">Rol editorial efectivo en preview</div>
-              <div class="insp-preset-grid">
-                <span class="insp-preset-chip insp-preset-chip--accent">
-                  Rol: {bookStyleRoleLabel(selectedBlockStyleInfo.role)}
-                </span>
-                <span class="insp-preset-chip">
-                  Base: {selectedBlockStyleInfo.baseStyle.fontSize} pt / {selectedBlockStyleInfo.baseStyle.lineHeight}
-                </span>
-                <span class="insp-preset-chip">
-                  Final: {selectedBlockStyleInfo.finalStyle.fontSize} pt / {selectedBlockStyleInfo.finalStyle.lineHeight}
-                </span>
-                <span class="insp-preset-chip">
-                  Alineación: {selectedBlockStyleInfo.finalStyle.textAlign}
-                </span>
-                <span class="insp-preset-chip">
-                  Ancho: {selectedBlockStyleInfo.finalStyle.maxWidth ?? 'auto'}
-                </span>
-                <span class="insp-preset-chip">
-                  Peso: {selectedBlockStyleInfo.finalStyle.fontWeight}
-                </span>
-              </div>
-              <p class="insp-preset-note">
-                Este bloque se renderiza con el estilo global <strong>{bookStyleRoleLabel(selectedBlockStyleInfo.role)}</strong>,
-                combinado con los overrides locales que existan.
-              </p>
-              <p class="insp-debug-note" title={buildResolvedBookStyleDebug(selectedBlockStyleInfo)}>
-                {buildResolvedBookStyleDebug(selectedBlockStyleInfo)}
-              </p>
-            </div>
-          {/if}
 
           {#if inspSurface === 'image_placeholder'}
             <div class="insp-field">
@@ -2246,6 +2232,47 @@
             </div>
           {/if}
 
+          <div class="insp-divider"></div>
+          <div class="insp-meta">
+            <span class="insp-meta-row"><span class="insp-meta-key">Posición</span><span class="insp-meta-val">#{selectedBlock.orderIndex + 1}</span></span>
+          </div>
+
+          {:else}
+          <!-- ── Tab: Formato ── -->
+
+          {#if selectedBlockStyleInfo}
+            <div class="insp-preset-card insp-preset-card--style-role">
+              <div class="insp-preset-title">Rol editorial efectivo en preview</div>
+              <div class="insp-preset-grid">
+                <span class="insp-preset-chip insp-preset-chip--accent">
+                  Rol: {bookStyleRoleLabel(selectedBlockStyleInfo.role)}
+                </span>
+                <span class="insp-preset-chip">
+                  Base: {selectedBlockStyleInfo.baseStyle.fontSize} pt / {selectedBlockStyleInfo.baseStyle.lineHeight}
+                </span>
+                <span class="insp-preset-chip">
+                  Final: {selectedBlockStyleInfo.finalStyle.fontSize} pt / {selectedBlockStyleInfo.finalStyle.lineHeight}
+                </span>
+                <span class="insp-preset-chip">
+                  Alineación: {selectedBlockStyleInfo.finalStyle.textAlign}
+                </span>
+                <span class="insp-preset-chip">
+                  Ancho: {selectedBlockStyleInfo.finalStyle.maxWidth ?? 'auto'}
+                </span>
+                <span class="insp-preset-chip">
+                  Peso: {selectedBlockStyleInfo.finalStyle.fontWeight}
+                </span>
+              </div>
+              <p class="insp-preset-note">
+                Este bloque se renderiza con el estilo global <strong>{bookStyleRoleLabel(selectedBlockStyleInfo.role)}</strong>,
+                combinado con los overrides locales que existan.
+              </p>
+              <p class="insp-debug-note" title={buildResolvedBookStyleDebug(selectedBlockStyleInfo)}>
+                {buildResolvedBookStyleDebug(selectedBlockStyleInfo)}
+              </p>
+            </div>
+          {/if}
+
           {#if blockShowsLayoutControls(insp_bType)}
             <div class="insp-divider"></div>
             <div class="insp-section-label">Presentación</div>
@@ -2364,10 +2391,7 @@
             </div>
           {/if}
 
-          <div class="insp-divider"></div>
-          <div class="insp-meta">
-            <span class="insp-meta-row"><span class="insp-meta-key">Posición</span><span class="insp-meta-val">#{selectedBlock.orderIndex + 1}</span></span>
-          </div>
+          {/if}
 
         </div>
       {/if}
@@ -3060,6 +3084,41 @@
     opacity: 0.45;
     cursor: not-allowed;
   }
+
+  /* Botón fijo al final de la lista de bloques */
+  .manuscript-append-row {
+    display: flex;
+    justify-content: center;
+    padding: 10px 0 18px;
+  }
+
+  .manuscript-append-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    border: 1.5px dashed rgba(0, 0, 0, 0.22);
+    background: transparent;
+    color: rgba(0, 0, 0, 0.35);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+  }
+
+  .manuscript-append-btn:hover:not(:disabled) {
+    border-color: rgba(27, 53, 82, 0.5);
+    border-style: solid;
+    background: rgba(255,255,255,0.9);
+    color: #1b3552;
+  }
+
+  .manuscript-append-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
   .manuscript-block.block-item {
     display: block;
     padding: 8px 8px 10px;
@@ -3230,6 +3289,39 @@
 
   .insp-back-section:hover {
     color: #7ab8e8;
+  }
+
+  /* ── Inspector tabs ── */
+  .insp-tab-bar {
+    display: flex;
+    gap: 2px;
+    padding: 8px 12px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    margin-bottom: 4px;
+  }
+
+  .insp-tab {
+    flex: 1;
+    padding: 6px 4px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: rgba(255,255,255,0.45);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: center;
+    transition: color 0.15s, border-color 0.15s;
+    margin-bottom: -1px;
+  }
+
+  .insp-tab:hover {
+    color: rgba(255,255,255,0.75);
+  }
+
+  .insp-tab--active {
+    color: #7ab8e8;
+    border-bottom-color: #7ab8e8;
   }
 
   /* PARTE 7 — reflejo de layout en el inspector */
