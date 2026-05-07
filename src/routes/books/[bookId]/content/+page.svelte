@@ -19,6 +19,7 @@
     createBlockInSection,
     createBlockFirstInSection,
     sectionTypeLabel,
+    sectionTypeIconPath,
     getSectionCreationDefaults,
     getSectionEditorialPreset,
     resolveSectionEditorialRules,
@@ -122,6 +123,7 @@
   let showBlockPalette       = $state(false);
   let focusMode              = $state(false);
   let inspectorTab           = $state<'block' | 'format'>('block');
+  let sectionBlockCounts     = $state<Record<string, number>>({});
 
   // ── Drag & drop ───────────────────────────────────────────────────────────
   let dragSectionId          = $state<string | null>(null);
@@ -297,6 +299,12 @@
 
   $effect(() => {
     if (bookId) void loadBookStylesContext();
+  });
+
+  $effect(() => {
+    if (selectedSectionId && blocks.length >= 0) {
+      sectionBlockCounts = { ...sectionBlockCounts, [selectedSectionId]: blocks.length };
+    }
   });
 
   async function loadBookAssets() {
@@ -1447,6 +1455,9 @@
                 aria-current={selectedSectionId === section.id ? 'true' : undefined}
                 onclick={() => selectSection(section.id)}
               >
+                <svg class="section-type-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d={sectionTypeIconPath(section.sectionType)}/>
+                </svg>
                 <span class="section-info">
                   <span class="section-title-text">
                     {section.title || sectionTypeLabel(section.sectionType)}
@@ -1455,6 +1466,11 @@
                     <span class="section-type-muted">{sectionTypeLabel(section.sectionType)}</span>
                   {/if}
                 </span>
+                {#if sectionBlockCounts[section.id] !== undefined}
+                  <span class="section-blk-count" title="{sectionBlockCounts[section.id]} bloque(s)">
+                    {sectionBlockCounts[section.id]}
+                  </span>
+                {/if}
               </button>
 
               <!-- Acciones: visibles en hover/activo -->
@@ -2844,6 +2860,48 @@
   }
 
   .section-item-main--active .section-type-muted {
+    color: var(--editor-accent-muted);
+  }
+
+  /* Icono de tipo de sección */
+  .section-type-icon {
+    flex-shrink: 0;
+    width: 13px;
+    height: 13px;
+    margin-right: 6px;
+    color: rgba(255,255,255,0.3);
+    transition: color 0.15s;
+  }
+
+  .section-item-main:hover .section-type-icon,
+  .section-item-main--active .section-type-icon {
+    color: rgba(255,255,255,0.6);
+  }
+
+  .section-item-main--active .section-type-icon {
+    color: var(--editor-accent);
+  }
+
+  /* Contador de bloques */
+  .section-blk-count {
+    flex-shrink: 0;
+    margin-left: 4px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.07);
+    color: rgba(255,255,255,0.35);
+    font-size: 10px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: 16px;
+    text-align: center;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .section-item-main--active .section-blk-count {
+    background: rgba(122,184,232,0.15);
     color: var(--editor-accent-muted);
   }
 

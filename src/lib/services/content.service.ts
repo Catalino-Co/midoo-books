@@ -30,6 +30,7 @@ export {
   sectionPropertyIsOverridden,
   sectionTypeLabel,
   sectionTypeBadge,
+  sectionTypeIconPath,
   sectionOpeningBehaviorLabel,
   sectionDefaultTextAlignLabel,
   type SectionTypeMeta,
