@@ -284,6 +284,9 @@ export class WebAdapter implements IPlatformAdapter {
   listExportJobsByBook(_bookId: string, _limit?: number): Promise<import('$lib/core/domain/export').ExportJob[]> {
     return Promise.resolve([]);
   }
+  clearExportHistory(_bookId: string): Promise<void> {
+    return Promise.resolve();
+  }
   renderBookPdf(_bookId: string, _opts: { format: 'screen' | 'print'; baseUrl: string }): Promise<Buffer> {
     return Promise.reject(new Error('WebAdapter: PDF solo en Electron.'));
   }

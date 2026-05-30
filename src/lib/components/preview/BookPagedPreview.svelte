@@ -5,12 +5,12 @@
   import type { PaginatedBookResult, PlacedBlock, RenderedPage } from '$lib/core/editorial/page-layout-model';
   import type { Asset } from '$lib/core/domain/asset';
   import { pageDimensionsMm } from '$lib/core/editorial/document-page-geometry';
+  import { physicalPageWidthPx, physicalPageHeightPx } from '$lib/services/preview-layout.service';
   import {
     buildPreviewSheetCssVars,
     buildPreviewContentBoxStyle,
     buildPreviewSafeAreaStyle,
     buildPreviewBodyPaddingStyle,
-    pageHeightOverWidthRatio,
   } from '$lib/core/editorial/preview-page-style';
   import {
     resolveBookStyles,
@@ -53,12 +53,42 @@
   let layoutSettings = $derived(layout.layoutSettings);
   let bookStyles = $derived(resolveBookStyles(layoutSettings));
 
+  // ── Zoom ───────────────────────────────────────────────────────────────────
+  const ZOOM_STEPS  = [0.40, 0.50, 0.65, 0.75, 0.85, 1.00, 1.25, 1.50];
+  const ZOOM_MIN    = 0.40;
+  const ZOOM_MAX    = 1.50;
+  const ZOOM_DEFAULT = 0.85;
+
+  let zoom = $state(ZOOM_DEFAULT);
+
+  function zoomIn() {
+    const next = ZOOM_STEPS.find(z => z > zoom + 0.001);
+    zoom = next !== undefined ? next : Math.min(ZOOM_MAX, Math.round((zoom + 0.05) * 100) / 100);
+  }
+  function zoomOut() {
+    const prev = [...ZOOM_STEPS].reverse().find(z => z < zoom - 0.001);
+    zoom = prev !== undefined ? prev : Math.max(ZOOM_MIN, Math.round((zoom - 0.05) * 100) / 100);
+  }
+  function resetZoom() { zoom = ZOOM_DEFAULT; }
+
+  // ── Dimensiones físicas a 96 dpi ───────────────────────────────────────────
+  let physWidthPx  = $derived(physicalPageWidthPx(layoutSettings));
+  let physHeightPx = $derived(physicalPageHeightPx(layoutSettings));
+
+  // Dimensiones escaladas (lo que ocupa en el DOM)
+  let scaledWidthPx  = $derived(Math.round(physWidthPx  * zoom));
+  let scaledHeightPx = $derived(Math.round(physHeightPx * zoom));
+
   let pagedRootCss = $derived.by(() => {
     const vars = buildPreviewSheetCssVars(layoutSettings);
-    const ratio = pageHeightOverWidthRatio(layoutSettings);
     const entries = Object.entries(vars).map(([k, v]) => `${k}:${v}`);
-    entries.push('--page-w:min(440px, 92vw)');
-    entries.push(`--page-h:calc(min(440px, 92vw) * ${ratio})`);
+    // Variables de dimensión física y zoom
+    entries.push(`--page-phys-w:${physWidthPx}px`);
+    entries.push(`--page-phys-h:${physHeightPx}px`);
+    entries.push(`--zoom:${zoom}`);
+    // --page-w / --page-h = dimensiones escaladas (para contenedores y thumb-col)
+    entries.push(`--page-w:${scaledWidthPx}px`);
+    entries.push(`--page-h:${scaledHeightPx}px`);
     return entries.join(';');
   });
 
@@ -67,7 +97,8 @@
     if (bleed <= 0) return '';
     const { widthMm } = pageDimensionsMm(layoutSettings);
     const frac = bleed / Math.max(1e-6, widthMm);
-    return `box-shadow:0 0 0 max(1px,calc(var(--page-w) * ${frac})) rgba(255, 130, 70, 0.38);`;
+    // box-shadow se aplica sobre la hoja física (antes del scale)
+    return `box-shadow:0 0 0 max(1px,calc(var(--page-phys-w) * ${frac})) rgba(255, 130, 70, 0.38);`;
   });
 
   let contentBoxStyle = $derived.by(() => {
@@ -193,6 +224,14 @@
             {#if contentHrefForPage(activePage)}
               <a class="btn-mini btn-mini--jump" href={contentHrefForPage(activePage) ?? '#'}>Contenido</a>
             {/if}
+
+            <!-- Controles de zoom -->
+            <div class="zoom-controls" title="Zoom de visualización (no afecta la paginación)">
+              <button type="button" class="btn-mini btn-mini--zoom" disabled={zoom <= ZOOM_MIN} onclick={zoomOut} title="Reducir zoom">−</button>
+              <button type="button" class="zoom-label" onclick={resetZoom} title="Restablecer zoom al 85%">{Math.round(zoom * 100)}%</button>
+              <button type="button" class="btn-mini btn-mini--zoom" disabled={zoom >= ZOOM_MAX} onclick={zoomIn} title="Aumentar zoom">+</button>
+            </div>
+
             <button
               type="button"
               class="btn-mini"
@@ -208,6 +247,8 @@
           </div>
         </div>
 
+        <!-- Wrapper que ocupa el espacio DOM escalado -->
+        <div class="page-sheet-wrap">
         <article
           class="page-sheet"
           class:page-sheet--left={activePage.side === 'left'}
@@ -355,6 +396,7 @@
           {/if}
           </div>
         </article>
+        </div><!-- /page-sheet-wrap -->
       {/if}
     </div>
   {/if}
@@ -365,12 +407,15 @@
     --preview-toolbar-h: 30px;
     --preview-toolbar-gap: 10px;
     display: flex;
-    gap: 16px;
+    gap: 0;
     align-items: stretch;
     width: 100%;
     max-width: 1100px;
     margin: 0 auto;
-    padding: 12px 0 32px;
+    /* Llenar el alto disponible en el panel */
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
   }
   .paged-empty {
     color: rgba(255, 255, 255, 0.4);
@@ -382,13 +427,18 @@
     flex-direction: column;
     gap: 8px;
     width: 92px;
-    height: calc(var(--page-h) + var(--preview-toolbar-h) + var(--preview-toolbar-gap));
-    max-height: calc(var(--page-h) + var(--preview-toolbar-h) + var(--preview-toolbar-gap));
+    /* Ocupa todo el alto disponible y hace scroll internamente */
+    height: 100%;
+    max-height: 100%;
     overflow-y: auto;
     flex-shrink: 0;
-    padding: 6px;
-    border-radius: 12px;
+    padding: 8px 6px;
     background: rgba(0, 0, 0, 0.2);
+    border-radius: 12px 0 0 12px;
+    /* Separador visual con el área principal */
+    border-right: 1px solid rgba(255, 255, 255, 0.07);
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.1) transparent;
   }
   .thumb {
     display: flex;
@@ -434,9 +484,16 @@
   .main-col {
     flex: 1;
     min-width: 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     gap: 10px;
+    /* Scroll vertical independiente para la página */
+    overflow-y: auto;
+    overflow-x: auto;
+    padding: 12px 20px 40px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.12) transparent;
   }
 
   .page-toolbar {
@@ -484,12 +541,69 @@
     cursor: default;
   }
 
-  .page-sheet {
+  /* ── Controles de zoom ─────────────────────────────────────────────────── */
+  .zoom-controls {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 7px;
+    padding: 2px;
+  }
+
+  .btn-mini--zoom {
+    width: 26px;
+    height: 26px;
+    font-size: 16px;
+    font-weight: 400;
+    border: none;
+    background: transparent;
+    border-radius: 5px;
+  }
+  .btn-mini--zoom:hover:not(:disabled) {
+    background: rgba(255,255,255,0.1);
+    border-color: transparent;
+  }
+
+  .zoom-label {
+    min-width: 40px;
+    height: 26px;
+    padding: 0 4px;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: inherit;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255,255,255,0.7);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    border-radius: 4px;
+    text-align: center;
+  }
+  .zoom-label:hover {
+    background: rgba(255,255,255,0.08);
+    color: #fff;
+  }
+
+  /* Wrapper que reserva el espacio DOM exacto del contenido escalado */
+  .page-sheet-wrap {
     width: var(--page-w);
     height: var(--page-h);
-    min-height: var(--page-h);
-    max-height: var(--page-h);
+    flex-shrink: 0;
+    overflow: hidden;
     margin: 0 auto;
+  }
+
+  .page-sheet {
+    /* Dimensiones físicas reales (96 dpi, antes del zoom) */
+    width: var(--page-phys-w);
+    height: var(--page-phys-h);
+    min-height: var(--page-phys-h);
+    max-height: var(--page-phys-h);
+    /* Escalar hacia el tamaño visual deseado */
+    transform: scale(var(--zoom));
+    transform-origin: top left;
     background: #d8d8d4;
     color: #1a1a22;
     border-radius: 3px;

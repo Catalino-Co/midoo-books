@@ -92,8 +92,9 @@
     flex: 1;
     display: flex;
     flex-direction: column;
-    padding: 20px 24px 40px;
+    padding: 20px 24px 0;
     min-height: 0;
+    overflow: hidden;
   }
   .preview-head {
     max-width: 1100px;

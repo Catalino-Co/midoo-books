@@ -11,6 +11,25 @@ import { buildPaginatedLayout } from '$lib/core/editorial/page-layout-engine';
 import type { PaginatedBookResult } from '$lib/core/editorial/page-layout-model';
 import { BrowserPreviewTextMeasurer } from '$lib/core/editorial/browser-preview-text-measurer';
 import { computeLayoutEngineMetricsForPreviewWidth } from '$lib/core/editorial/document-layout-metrics';
+import { pageDimensionsMm } from '$lib/core/editorial/document-page-geometry';
+import type { LayoutSettings } from '$lib/core/domain/layout';
+
+/** Conversión mm → px a 96 dpi (resolución estándar de pantalla). */
+export const SCREEN_MM_TO_PX = 96 / 25.4;
+
+type PageDimInput = Pick<LayoutSettings, 'pageWidth' | 'pageHeight' | 'pageUnit'>;
+
+/** Ancho físico real de la página en px a 96 dpi. */
+export function physicalPageWidthPx(settings: PageDimInput): number {
+  const { widthMm } = pageDimensionsMm(settings);
+  return Math.round(widthMm * SCREEN_MM_TO_PX);
+}
+
+/** Alto físico real de la página en px a 96 dpi. */
+export function physicalPageHeightPx(settings: PageDimInput): number {
+  const { heightMm } = pageDimensionsMm(settings);
+  return Math.round(heightMm * SCREEN_MM_TO_PX);
+}
 
 export async function loadBookLayoutSnapshot(bookId: string): Promise<BookLayoutSnapshot> {
   const book = await getBook(bookId);
@@ -41,9 +60,10 @@ export async function computePaginatedPreviewForBrowser(snapshot: BookLayoutSnap
     return buildPaginatedLayout(snapshot);
   }
 
-  const pageWidthPx = typeof window === 'undefined'
-    ? 440
-    : Math.min(440, Math.max(260, window.innerWidth * 0.92));
+  // Usar el ancho físico real de la página (96 dpi) en lugar del techo de 440 px.
+  // Esto garantiza que el motor de paginación mida el texto con las mismas
+  // proporciones físicas que tendrá el PDF exportado.
+  const pageWidthPx = physicalPageWidthPx(snapshot.layoutSettings);
   const engineMetrics = computeLayoutEngineMetricsForPreviewWidth(snapshot.layoutSettings, pageWidthPx);
   const measurer = new BrowserPreviewTextMeasurer(engineMetrics);
   try {

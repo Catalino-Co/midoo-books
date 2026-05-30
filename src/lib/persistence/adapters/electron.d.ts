@@ -102,6 +102,7 @@ declare global {
         create(input: CreateExportJobInput):                                                           Promise<ExportJob | { error: string }>;
         update(id: string, updates: UpdateExportJobInput):                                             Promise<ExportJob | null | { error: string }>;
         listByBook(bookId: string, limit?: number):                                                    Promise<ExportJob[] | { error: string }>;
+        clearHistory(bookId: string):                                                                  Promise<number | { error: string }>;
         renderPdf(bookId: string, opts: { format: 'screen' | 'print'; baseUrl: string }):             Promise<Buffer | { error: string }>;
         saveFile(buffer: Buffer, name: string, filters: { name: string; extensions: string[] }[]):    Promise<{ success: boolean; path?: string; canceled?: boolean } | { error: string }>;
       };
