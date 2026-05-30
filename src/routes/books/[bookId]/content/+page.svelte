@@ -64,6 +64,11 @@
     type ChapterOpeningTextPosition,
     type ChapterOpeningTextAlign,
     type ChapterOpeningTextColorMode,
+    parseTitlePageContent,
+    serializeTitlePageContent,
+    EMPTY_TITLE_PAGE_CONTENT,
+    TITLE_PAGE_TEXT_ALIGN_VALUES,
+    type TitlePageTextAlign,
     type MarkdownBookImportMode,
     type MarkdownImportMode,
   } from '$lib/services/content.service';
@@ -272,6 +277,14 @@
   let insp_bCoOverlay        = $state(true);
   let insp_bCoTextColorMode  = $state<ChapterOpeningTextColorMode>('light');
 
+  // ── Campos TITLE_PAGE ────────────────────────────────────────────────────
+  let insp_bTpSeriesLabel    = $state('');
+  let insp_bTpTitle          = $state('');
+  let insp_bTpSubtitle       = $state('');
+  let insp_bTpAuthorLine     = $state('');
+  let insp_bTpPublisherInfo  = $state('');
+  let insp_bTpTextAlign      = $state<TitlePageTextAlign>('center');
+
   let bookAssets           = $state<Asset[]>([]);
 
   // Suciedad del inspector
@@ -351,6 +364,16 @@
     insp_bCoTextAlign     = d.textAlign;
     insp_bCoOverlay       = d.overlay;
     insp_bCoTextColorMode = d.textColorMode;
+  }
+
+  function resetTitlePageInspector() {
+    const d = EMPTY_TITLE_PAGE_CONTENT;
+    insp_bTpSeriesLabel   = d.seriesLabel;
+    insp_bTpTitle         = d.title;
+    insp_bTpSubtitle      = d.subtitle;
+    insp_bTpAuthorLine    = d.authorLine;
+    insp_bTpPublisherInfo = d.publisherInfo;
+    insp_bTpTextAlign     = d.textAlign;
   }
 
   function blockPreviewIsMuted(block: DocumentBlock): boolean {
@@ -557,6 +580,17 @@
     } else {
       resetChapterOpeningInspector();
     }
+    if (block.blockType === 'TITLE_PAGE') {
+      const tp = parseTitlePageContent(block.contentJson);
+      insp_bTpSeriesLabel   = tp.seriesLabel;
+      insp_bTpTitle         = tp.title;
+      insp_bTpSubtitle      = tp.subtitle;
+      insp_bTpAuthorLine    = tp.authorLine;
+      insp_bTpPublisherInfo = tp.publisherInfo;
+      insp_bTpTextAlign     = tp.textAlign;
+    } else {
+      resetTitlePageInspector();
+    }
     resetInspectorDirty();
   }
 
@@ -664,9 +698,19 @@
           overlay:      insp_bCoOverlay,
           textColorMode: insp_bCoTextColorMode,
         });
+      } else if (insp_bType === 'TITLE_PAGE') {
+        contentJsonPayload = serializeTitlePageContent({
+          seriesLabel:   insp_bTpSeriesLabel,
+          title:         insp_bTpTitle,
+          subtitle:      insp_bTpSubtitle,
+          authorLine:    insp_bTpAuthorLine,
+          publisherInfo: insp_bTpPublisherInfo,
+          textAlign:     insp_bTpTextAlign,
+        });
       } else if (
         (prev?.blockType === 'IMAGE' && insp_bType !== 'IMAGE')
         || (prev?.blockType === 'CHAPTER_OPENING' && insp_bType !== 'CHAPTER_OPENING')
+        || (prev?.blockType === 'TITLE_PAGE' && insp_bType !== 'TITLE_PAGE')
       ) {
         contentJsonPayload = null;
       }
@@ -883,6 +927,13 @@
         blockType:   type,
         contentText: '',
         contentJson: serializeChapterOpeningContent({ ...EMPTY_CHAPTER_OPENING_CONTENT }),
+      };
+    }
+    if (type === 'TITLE_PAGE') {
+      return {
+        blockType:   type,
+        contentText: '',
+        contentJson: serializeTitlePageContent({ ...EMPTY_TITLE_PAGE_CONTENT }),
       };
     }
     return { blockType: type, contentText: '' };
@@ -2228,6 +2279,71 @@
                 {/each}
               </select>
             </div>
+          {:else if inspSurface === 'title_page'}
+            <!-- ── Inspector: TITLE_PAGE ─────────────────────────────── -->
+            <p class="insp-hint insp-hint--block">
+              Slots de posición fija para la portadilla del libro. Cada campo aparece en su zona vertical asignada en la página.
+            </p>
+
+            <div class="insp-field">
+              <label class="insp-label" for="ib-tp-align">Alineación de texto</label>
+              <select
+                id="ib-tp-align"
+                class="insp-select"
+                bind:value={insp_bTpTextAlign}
+                onchange={() => { markInspectorDirty(); onInspectorBlur(); }}
+              >
+                {#each TITLE_PAGE_TEXT_ALIGN_VALUES as a}
+                  <option value={a}>{a === 'left' ? 'Izquierda' : a === 'center' ? 'Centrado' : 'Derecha'}</option>
+                {/each}
+              </select>
+            </div>
+
+            <div class="insp-tp-preview">
+              <div class="insp-tp-preview__page" style="text-align:{insp_bTpTextAlign}">
+                {#if insp_bTpSeriesLabel.trim()}<div class="insp-tp-preview__series">{insp_bTpSeriesLabel}</div>{/if}
+                {#if insp_bTpTitle.trim()}<div class="insp-tp-preview__title">{insp_bTpTitle}</div>{/if}
+                {#if insp_bTpSubtitle.trim()}<div class="insp-tp-preview__subtitle">{insp_bTpSubtitle}</div>{/if}
+                {#if insp_bTpAuthorLine.trim()}<div class="insp-tp-preview__author">{insp_bTpAuthorLine}</div>{/if}
+                {#if insp_bTpPublisherInfo.trim()}<div class="insp-tp-preview__publisher">{insp_bTpPublisherInfo}</div>{/if}
+              </div>
+            </div>
+
+            <div class="insp-field">
+              <label class="insp-label" for="ib-tp-series">Género / Serie <span class="insp-slot-badge">zona superior</span></label>
+              <input id="ib-tp-series" class="insp-input" bind:value={insp_bTpSeriesLabel}
+                oninput={markInspectorDirty} onblur={onInspectorBlur} maxlength={120}
+                placeholder="Ej: Novela Ligera Ilustrada" />
+            </div>
+
+            <div class="insp-field">
+              <label class="insp-label" for="ib-tp-title">Título principal <span class="insp-slot-badge insp-slot-badge--accent">zona central</span></label>
+              <input id="ib-tp-title" class="insp-input" bind:value={insp_bTpTitle}
+                oninput={markInspectorDirty} onblur={onInspectorBlur} maxlength={300}
+                placeholder="Ej: Los Secretos de la Antigua Aldea del Sonido" />
+            </div>
+
+            <div class="insp-field">
+              <label class="insp-label" for="ib-tp-subtitle">Subtítulo <span class="insp-slot-badge">zona central baja</span></label>
+              <input id="ib-tp-subtitle" class="insp-input" bind:value={insp_bTpSubtitle}
+                oninput={markInspectorDirty} onblur={onInspectorBlur} maxlength={200}
+                placeholder="Ej: El misterio del bosque eterno (opcional)" />
+            </div>
+
+            <div class="insp-field">
+              <label class="insp-label" for="ib-tp-author">Autor <span class="insp-slot-badge">zona inferior</span></label>
+              <input id="ib-tp-author" class="insp-input" bind:value={insp_bTpAuthorLine}
+                oninput={markInspectorDirty} onblur={onInspectorBlur} maxlength={200}
+                placeholder="Ej: Escrito por Junior C. Rodriguez V." />
+            </div>
+
+            <div class="insp-field">
+              <label class="insp-label" for="ib-tp-publisher">Editorial / Año <span class="insp-slot-badge">pie de página</span></label>
+              <input id="ib-tp-publisher" class="insp-input" bind:value={insp_bTpPublisherInfo}
+                oninput={markInspectorDirty} onblur={onInspectorBlur} maxlength={200}
+                placeholder="Ej: Horizonte · 2025 (opcional)" />
+            </div>
+
           {:else if inspSurface === 'static_page_break'}
             <div class="insp-static-note">
               <p>Este bloque fuerza un salto de página en la maquetación final. No lleva texto.</p>
@@ -3493,6 +3609,51 @@
 
   .insp-image-import {
     margin-top: 8px;
+  }
+
+  /* ── Title Page inspector preview ──────────────────────────────────── */
+  .insp-tp-preview {
+    width: 100%;
+    margin-bottom: 14px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #fafaf8;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .insp-tp-preview__page {
+    padding: 14px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-height: 110px;
+    color: #1a1a22;
+    font-family: 'Georgia', serif;
+    font-size: 11px;
+    line-height: 1.4;
+  }
+  .insp-tp-preview__series   { font-size: 9px; opacity: 0.55; letter-spacing: 0.04em; margin-bottom: 6px; }
+  .insp-tp-preview__title    { font-size: 14px; font-weight: 700; line-height: 1.2; }
+  .insp-tp-preview__subtitle { font-size: 11px; font-weight: 500; opacity: 0.75; }
+  .insp-tp-preview__author   { font-size: 10px; opacity: 0.65; margin-top: 8px; }
+  .insp-tp-preview__publisher{ font-size: 9px; opacity: 0.4; margin-top: auto; padding-top: 10px; }
+
+  /* Badges de slot */
+  .insp-slot-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: 0;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.07);
+    color: rgba(255,255,255,0.35);
+    margin-left: 5px;
+    vertical-align: middle;
+  }
+  .insp-slot-badge--accent {
+    background: rgba(122,184,232,0.12);
+    color: rgba(122,184,232,0.7);
   }
 
   .insp-co-preview {

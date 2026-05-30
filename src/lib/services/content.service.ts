@@ -101,6 +101,15 @@ export {
   type ChapterOpeningTextColorMode,
 } from '$lib/core/editorial/chapter-opening-content';
 
+export {
+  parseTitlePageContent,
+  serializeTitlePageContent,
+  EMPTY_TITLE_PAGE_CONTENT,
+  TITLE_PAGE_TEXT_ALIGN_VALUES,
+  type TitlePageBlockContent,
+  type TitlePageTextAlign,
+} from '$lib/core/editorial/title-page-content';
+
 // ─── Secciones ────────────────────────────────────────────────────────────────
 
 export async function listSections(bookId: string): Promise<DocumentSection[]> {

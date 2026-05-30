@@ -256,6 +256,8 @@ function estimateBlockHeight(
       return 0;
     case 'CHAPTER_OPENING':
       return Math.floor(bodyH * 0.96);
+    case 'TITLE_PAGE':
+      return Math.floor(bodyH * 0.98);
   }
   return estimateTextBlockUnits(block.contentText, paragraphStyle, charsPerLine);
 }
@@ -462,6 +464,8 @@ class Paginator {
         return 0;
       case 'CHAPTER_OPENING':
         return Math.floor(this.metrics.pageBodyHeightUnits * 0.96);
+      case 'TITLE_PAGE':
+        return Math.floor(this.metrics.pageBodyHeightUnits * 0.98);
     }
 
     return estimateTextBlockUnits(block.contentText, paragraphStyle, this.metrics.charsPerLine);
@@ -967,6 +971,17 @@ class Paginator {
       };
       this.placePlacement(section, placed, h);
       this.startNewContentPage('Tras CHAPTER_OPENING');
+      return;
+    }
+
+    if (block.blockType === 'TITLE_PAGE') {
+      if (this.used > 0) this.startNewContentPage('TITLE_PAGE en página dedicada');
+      const h = Math.min(
+        this.metrics.pageBodyHeightUnits,
+        this.estimateBlockHeightForPlacement(block, section),
+      );
+      this.placePlacement(section, { block, estimatedUnits: h, fullPageComposition: true }, h);
+      this.startNewContentPage('Tras TITLE_PAGE');
       return;
     }
 

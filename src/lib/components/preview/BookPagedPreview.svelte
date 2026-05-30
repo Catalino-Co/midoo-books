@@ -24,6 +24,7 @@
     parseImageBlockContent,
     parseChapterOpeningContent,
     chapterOpeningPreviewRootClassNames,
+    parseTitlePageContent,
   } from '$lib/services/content.service';
   import { sectionTypeLabel } from '$lib/services/content.service';
 
@@ -335,6 +336,27 @@
                           <span class="co-render__tit" style={chapterOpeningTextStyle(bookStyles.CHAPTER_OPENING_TITLE, co.textAlign)}>{co.title}</span>
                         {/if}
                       </div>
+                    </div>
+                  {:else if pl.block?.blockType === 'TITLE_PAGE'}
+                    {@const tp = parseTitlePageContent(pl.block.contentJson)}
+                    <div class="tp-render" style="text-align:{tp.textAlign}">
+                      {#if tp.seriesLabel.trim()}
+                        <div class="tp-render__series" style={buildBookStyleCss(bookStyles.HEADING_4, { includeMargins: false })}>{tp.seriesLabel}</div>
+                      {/if}
+                      <div class="tp-render__title-area">
+                        {#if tp.title.trim()}
+                          <div class="tp-render__title" style={buildBookStyleCss(bookStyles.TITLE, { includeMargins: false })}>{tp.title}</div>
+                        {/if}
+                        {#if tp.subtitle.trim()}
+                          <div class="tp-render__subtitle" style={buildBookStyleCss(bookStyles.HEADING_2, { includeMargins: false })}>{tp.subtitle}</div>
+                        {/if}
+                      </div>
+                      {#if tp.authorLine.trim()}
+                        <div class="tp-render__author" style={buildBookStyleCss(bookStyles.CENTERED_PHRASE, { includeMargins: false, includeMaxWidth: false })}>{tp.authorLine}</div>
+                      {/if}
+                      {#if tp.publisherInfo.trim()}
+                        <div class="tp-render__publisher" style={buildBookStyleCss(bookStyles.PARAGRAPH, { includeMargins: false })}>{tp.publisherInfo}</div>
+                      {/if}
                     </div>
                   {:else if pl.block?.blockType === 'IMAGE'}
                     {@const im = parseImageBlockContent(pl.block.contentJson)}
@@ -688,7 +710,10 @@
 
   .page-body {
     flex: 1;
-    font-family: 'Georgia', 'Times New Roman', serif;
+    /* No se fija font-family aquí: cada bloque recibe su font-family
+       via inline style de buildBookStyleCss(). El body hereda la fuente
+       del documento (Georgia del reset global), y los bloques sin fontFamily
+       explícito la heredan correctamente. */
     font-size: 13px;
     line-height: 1.55;
     min-height: 0;
@@ -736,6 +761,7 @@
     overflow-wrap: normal;
     word-break: normal;
     hyphens: none;
+    white-space: pre-wrap;
   }
   .flow-h2 {
     font-size: 1.15rem;
@@ -745,12 +771,14 @@
     overflow-wrap: normal;
     word-break: normal;
     hyphens: none;
+    white-space: pre-wrap;
   }
   .flow-p {
     margin: 0 0 0.75em;
     overflow-wrap: normal;
     word-break: normal;
     hyphens: none;
+    white-space: pre-wrap;
   }
   .flow-quote {
     margin: 0.6em 0;
@@ -760,6 +788,7 @@
     overflow-wrap: normal;
     word-break: normal;
     hyphens: none;
+    white-space: pre-wrap;
   }
   .flow-center {
     text-align: center;
@@ -768,6 +797,7 @@
     overflow-wrap: normal;
     word-break: normal;
     hyphens: none;
+    white-space: pre-wrap;
   }
   .flow-sep {
     border: none;
@@ -884,6 +914,36 @@
     color: rgba(0, 0, 0, 0.5);
     margin-top: 6px;
     text-align: center;
+  }
+
+  /* ── TITLE_PAGE render ─────────────────────────────────────────────── */
+  .tp-render {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-height: inherit;
+    padding: 0;
+  }
+  .tp-render__series {
+    padding-top: 18%;
+    opacity: 0.7;
+  }
+  .tp-render__title-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 4% 0;
+    gap: 0.4em;
+  }
+  .tp-render__title   { line-height: 1.15; }
+  .tp-render__subtitle{ opacity: 0.8; }
+  .tp-render__author  { padding-bottom: 6%; }
+  .tp-render__publisher {
+    margin-top: auto;
+    padding-bottom: 8%;
+    opacity: 0.55;
   }
 
   .co-render {

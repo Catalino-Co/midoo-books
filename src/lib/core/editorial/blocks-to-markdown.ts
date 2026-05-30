@@ -77,6 +77,18 @@ export function blockToMarkdown(block: DocumentBlock): string {
       return parts.join('\n') || `# ${text}`;
     }
 
+    case 'TITLE_PAGE': {
+      type TpContent = { title?: string; subtitle?: string; seriesLabel?: string; authorLine?: string; publisherInfo?: string };
+      const tp = parseJson<TpContent>(block.contentJson, {});
+      const parts: string[] = [];
+      if (tp.seriesLabel)   parts.push(`*${tp.seriesLabel}*`);
+      if (tp.title)         parts.push(`# ${tp.title}`);
+      if (tp.subtitle)      parts.push(`## ${tp.subtitle}`);
+      if (tp.authorLine)    parts.push(`\n${tp.authorLine}`);
+      if (tp.publisherInfo) parts.push(tp.publisherInfo);
+      return parts.join('\n') || '# [Página de título]';
+    }
+
     default:
       return text;
   }

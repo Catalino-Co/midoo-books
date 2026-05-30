@@ -25,6 +25,7 @@
     parseImageBlockContent,
     parseChapterOpeningContent,
     chapterOpeningPreviewRootClassNames,
+    parseTitlePageContent,
   } from '$lib/services/content.service';
   import type { PaginatedBookResult, PlacedBlock, RenderedPage } from '$lib/core/editorial/page-layout-model';
   import type { Asset } from '$lib/core/domain/asset';
@@ -187,6 +188,29 @@
                     {/if}
                   </div>
                 {/if}
+              {:else if pl.block?.blockType === 'TITLE_PAGE'}
+                {@const tp = parseTitlePageContent(pl.block.contentJson)}
+                {#if bookStyles}
+                  <div class="blk-tp" style="text-align:{tp.textAlign}">
+                    {#if tp.seriesLabel.trim()}
+                      <div class="tp-series" style={coTextStyle(bookStyles.HEADING_4, tp.textAlign)}>{tp.seriesLabel}</div>
+                    {/if}
+                    <div class="tp-title-area">
+                      {#if tp.title.trim()}
+                        <div class="tp-title" style={coTextStyle(bookStyles.TITLE, tp.textAlign)}>{tp.title}</div>
+                      {/if}
+                      {#if tp.subtitle.trim()}
+                        <div class="tp-subtitle" style={coTextStyle(bookStyles.HEADING_2, tp.textAlign)}>{tp.subtitle}</div>
+                      {/if}
+                    </div>
+                    {#if tp.authorLine.trim()}
+                      <div class="tp-author" style={coTextStyle(bookStyles.CENTERED_PHRASE, tp.textAlign)}>{tp.authorLine}</div>
+                    {/if}
+                    {#if tp.publisherInfo.trim()}
+                      <div class="tp-publisher" style={coTextStyle(bookStyles.PARAGRAPH, tp.textAlign)}>{tp.publisherInfo}</div>
+                    {/if}
+                  </div>
+                {/if}
               {:else if pl.block?.blockType === 'HEADING_1'}
                 <h1 style={textStyle(pg, pl)}>{bodyText(pl)}</h1>
               {:else if pl.block?.blockType === 'HEADING_2'}
@@ -225,7 +249,8 @@
     padding: 0 !important;
     background: white !important;
     color: #111 !important;
-    font-family: 'Georgia', 'Times New Roman', serif !important;
+    /* Font base del libro — los elementos con fontFamily en inline style la sobreescriben */
+    font-family: 'Georgia', 'Times New Roman', serif;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
@@ -260,11 +285,15 @@
   /* ── Elementos de bloque ── */
   h1, h2, h3, h4,
   .blk-p, .blk-quote, .blk-center {
-    /* Los estilos tipográficos vienen de textStyle() / inline */
+    /* Los estilos tipográficos vienen de textStyle() / inline.
+       NO setear font-family aquí: los inline styles de buildBookStyleCss()
+       traen el fontFamily correcto (o null = hereda Georgia del body). */
     margin: 0;
-    /* Heredar font-family del body (Georgia) para consistencia con el medidor */
-    font-family: inherit;
     color: inherit;
+    /* Preservar saltos de línea explícitos (\n) del editor de contenido.
+       pre-wrap: colapsa múltiples espacios pero respeta \n y sigue haciendo
+       word-wrap — compatible con text-align:justify. */
+    white-space: pre-wrap;
   }
 
   .blk-sep {
@@ -317,6 +346,27 @@
     gap: 0.3em;
     text-align: center;
   }
+
+  /* ── TITLE_PAGE export render ────────────────────────────────────── */
+  .blk-tp {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-height: inherit;
+  }
+  .tp-series    { padding-top: 18%; opacity: 0.7; }
+  .tp-title-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 4% 0;
+    gap: 0.35em;
+  }
+  .tp-subtitle  { opacity: 0.8; }
+  .tp-author    { padding-bottom: 6%; }
+  .tp-publisher { margin-top: auto; padding-bottom: 8%; opacity: 0.55; }
 
   @media print {
     .export-page {

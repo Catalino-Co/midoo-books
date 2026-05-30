@@ -1,6 +1,7 @@
 <script lang="ts">
   import { dev } from '$app/environment';
   import { page } from '$app/stores';
+  import { afterNavigate } from '$app/navigation';
   import BookPagedPreview from '$lib/components/preview/BookPagedPreview.svelte';
   import { loadBookLayoutSnapshot, computePaginatedPreviewForBrowser, findPreviewLocationForSelection } from '$lib/services/preview-layout.service';
   import { listAssets } from '$lib/services/assets.service';
@@ -55,7 +56,10 @@
     }
   }
 
-  $effect(() => {
+  // afterNavigate cubre tanto la carga inicial como cada vez que el usuario
+  // regresa a esta ruta (ej. desde Estilos → Vista previa), garantizando
+  // que los cambios de estilo siempre se reflejen sin necesidad de "Recargar".
+  afterNavigate(() => {
     if (bookId) void load();
   });
 </script>

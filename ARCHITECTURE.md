@@ -1,51 +1,53 @@
 # ARCHITECTURE — MIDOO BOOKS
 
-> Documento vivo. Última actualización: 2026-04-11.
+> Documento vivo. Última actualización: 2026-05-30.
 
 ---
 
 ## 1. Visión del producto
 
-**MIDOO BOOKS** es una herramienta de maquetación editorial de escritorio que permite a autores independientes, diseñadores y pequeñas editoriales crear libros de calidad profesional directamente desde Markdown, sin depender de Canva, InDesign ni herramientas de suscripción.
+**MIDOO BOOKS** es una herramienta de maquetación editorial de escritorio que permite a autores independientes, diseñadores y pequeñas editoriales crear libros de calidad profesional sin depender de Canva, InDesign ni herramientas de suscripción.
 
 ### Para quién
 
 | Perfil | Necesidad |
 |---|---|
-| Autor independiente | Escribir en Markdown y obtener un PDF listo para imprimir sin curva técnica |
-| Diseñador editorial | Personalizar layouts, tipografía y estilos CSS sin código complejo |
-| Pequeña editorial | Gestionar catálogo de títulos con persistencia local y exportación PDF/EPUB |
+| Autor independiente | Escribir y exportar a PDF/EPUB listo para imprimir sin curva técnica |
+| Diseñador editorial | Personalizar tipografía, estilos y layout por sección |
+| Pequeña editorial | Gestionar catálogo de títulos con persistencia local y exportación multiformato |
 
 ### Principio rector
 
 > El autor escribe. MIDOO maqueta. El lector lee.
 
-La app nunca debe obligar al autor a pensar en puntos, márgenes ni columnas. La separación contenido/presentación es absoluta: el texto vive en Markdown, el diseño vive en CSS.
+La separación contenido/presentación es absoluta: el texto vive en bloques estructurados, el diseño vive en estilos de libro configurables. El usuario nunca toca CSS ni puntos tipográficos directamente.
 
 ---
 
-## 2. Stack tecnológico
+## 2. Stack tecnológico actual
 
 | Tecnología | Versión | Rol |
 |---|---|---|
 | **SvelteKit** | ^2.16 | Framework web / App Shell |
-| **Svelte 5** | ^5.25 | UI con runes ($state, $derived, $props) |
-| **TypeScript** | ^5.x | Tipado en packages/core y packages/persistence |
-| **Vite** | ^6.2 | Bundler para desarrollo y build web |
-| **Paged.js** | ^0.4.3 | Motor Web-to-Print (CSS3 Paged Media polyfill) |
-| **gray-matter** | ^4.0 | Parsing de YAML frontmatter en archivos .md |
-| **marked** | ^13.0 | Conversión Markdown → HTML |
-| **Electron** | ^30.x *(Fase 1)* | Shell nativo Windows/Mac/Linux |
-| **electron-builder** | ^25.x *(Fase 1)* | Empaquetado e instaladores (.exe, .dmg, .AppImage) |
-| **better-sqlite3** | ^9.x *(Fase 1)* | Persistencia local SQLite (síncrono, sin servidor) |
-| **npm workspaces** | nativo | Monorepo: packages/core + packages/persistence |
+| **Svelte 5** | ^5.25 | UI con runes (`$state`, `$derived`, `$props`, `$effect`) |
+| **TypeScript** | ^5.8 | Tipado estricto en todo el proyecto |
+| **Vite** | ^6.2 | Bundler de desarrollo y build web |
+| **Electron** | ^31.7 | Shell nativo Windows/Mac/Linux |
+| **electron-builder** | ^25.1 | Empaquetado e instaladores (.exe, .dmg, .AppImage) |
+| **sql.js** | ^1.12 | SQLite en WASM puro (sin compilación nativa) |
+| **esbuild** | ^0.21 | Compilación de TypeScript de Electron → CJS |
+| **docx** | ^9.6 | Exportación a Microsoft Word (.docx) |
+| **jszip** | ^3.10 | Construcción de archivos EPUB |
+| **gray-matter** | ^4.0 | Parsing de YAML frontmatter en importación Markdown |
+| **marked** | ^13.0 | Conversión Markdown → bloques estructurados |
 
 ### Por qué estas elecciones
 
-- **Svelte 5 + Runes**: reactividad granular sin overhead, ideal para UI de editor con estado complejo.
-- **Paged.js sobre headless Chrome**: funciona en el renderer de Electron sin dependencia de puppeteer. El CSS de impresión es el mismo que el de preview.
-- **better-sqlite3 sobre Prisma/Drizzle**: síncrono, sin servidor, cero latencia, ideal para app de escritorio single-user.
-- **Electron sobre Tauri**: el renderer SvelteKit puede reutilizarse como app web sin cambios. Tauri requeriría adaptar la capa de archivos a Rust.
+- **Svelte 5 Runes**: reactividad granular sin overhead, ideal para editor con estado complejo (inspector, paginación, zoom).
+- **sql.js sobre better-sqlite3**: WASM puro, sin compilación nativa — funciona con cualquier versión de Node.js/Electron sin recompilar.
+- **Motor de paginación propio**: en lugar de Paged.js, se construyó un motor TypeScript puro (`page-layout-engine.ts`) con medición de texto DOM en tiempo real. Permite control total de saltos de página, flujo de bloques y métricas físicas.
+- **printToPDF + CSS `@page`**: la exportación PDF usa `webContents.printToPDF()` de Electron sobre una ruta de render dedicada. El tamaño de página lo controla CSS `@page { size: Xmm Ymm }` para generar MediaBox estándar.
+- **Electron sobre Tauri**: el renderer SvelteKit se puede reutilizar como app web sin cambios. Tauri requeriría adaptar la capa de archivos a Rust.
 
 ---
 
@@ -54,373 +56,386 @@ La app nunca debe obligar al autor a pensar en puntos, márgenes ni columnas. La
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │  CAPA 1 — Core Editorial                                         │
-│  packages/core/                                                  │
+│  src/lib/core/                                                   │
 │                                                                  │
 │  TypeScript puro. CERO dependencias de plataforma.              │
-│  ✓ BookMeta, Book, Section, Block (tipos)                        │
-│  ✓ processMarkdown(rawMd) → { meta, content, headings }         │
-│  ✓ buildBookHtml(meta, content, headings) → HTML string         │
-│  ✓ slugifyHeading(text) → string                                │
-│  ✗ NO: fs, electron, svelte, better-sqlite3, window, document   │
+│  ✓ Dominio: Book, Section, Block, Asset, Layout, Export         │
+│  ✓ Motor de paginación: page-layout-engine.ts                   │
+│  ✓ Estilos editoriales: book-styles.ts                          │
+│  ✓ Geometría de página: document-page-geometry.ts               │
+│  ✓ Catálogos: section-type-catalog, block-type-catalog          │
+│  ✗ NO: fs, electron, svelte, sql.js, window*, document*         │
+│  (* excepto BrowserPreviewTextMeasurer que necesita DOM)         │
 └──────────────────────────┬───────────────────────────────────────┘
                            │  importa tipos + funciones puras
 ┌──────────────────────────▼───────────────────────────────────────┐
 │  CAPA 2 — App Shell                                              │
 │  src/  (SvelteKit)  +  electron/ (proceso principal)            │
 │                                                                  │
-│  ✓ Componentes Svelte, routing, Paged.js, toolbar, editor       │
+│  ✓ Componentes Svelte, routing, editor de contenido             │
+│  ✓ Motor de preview paginado con zoom físico                    │
+│  ✓ Módulos: Library, Content, Assets, Layout, Styles,          │
+│             Preview, Export                                      │
 │  ✓ Comunica con Capa 3 exclusivamente vía IPlatformAdapter      │
-│  ✗ NO importa better-sqlite3 directamente                       │
+│  ✗ NO importa sql.js directamente                               │
 │  ✗ NO accede a fs directamente (usa adapter)                    │
 └──────────────────────────┬───────────────────────────────────────┘
-                           │  IBookRepository, IPlatformAdapter
+                           │  IPC Electron / contextBridge
 ┌──────────────────────────▼───────────────────────────────────────┐
 │  CAPA 3 — Persistencia                                           │
-│  packages/persistence/                                           │
+│  electron/database/ + src/lib/persistence/                      │
 │                                                                  │
-│  ✓ SQLite: BookRepository, SectionRepository                    │
-│  ✓ ElectronAdapter (IPC → main process → fs)                   │
-│  ✓ WebAdapter (File System Access API, fallback web)            │
+│  ✓ sql.js SQLite: BookRepo, SectionRepo, BlockRepo,             │
+│              AssetRepo, LayoutRepo, ExportRepo                  │
+│  ✓ Migraciones versionadas (v1–v11+)                            │
+│  ✓ ElectronAdapter (contextBridge → IPC → main process)        │
+│  ✓ WebAdapter (stub para modo web sin Electron)                 │
 │  ✗ NO importa módulos de SvelteKit ($app/...)                   │
 │  ✗ NO importa componentes Svelte                                │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-### Flujo de datos (render de un libro)
-
-```
-.md file / SQLite
-      │
-      ▼
-processMarkdown()    ← packages/core
-      │
-      ▼
-buildBookHtml()      ← packages/core
-      │
-      ▼
-Paged.js Previewer   ← App Shell (browser/renderer)
-      │
-      ▼
-.pagedjs_page DOM nodes → UI editor (thumbnails, spreads, zoom)
-      │
-      ▼
-window.print()       → PDF
-```
-
 ---
 
-## 4. Estructura de carpetas (objetivo)
+## 4. Estructura de carpetas actual
 
 ```
 midoo-books/
 │
 ├── ARCHITECTURE.md              ← este archivo
-├── package.json                 ← monorepo root (npm workspaces)
+├── DEVELOPMENT.md               ← guía de setup y scripts
+├── Instrucciones.md             ← manual del módulo Maqueta
+├── package.json
+├── vite.config.js               ← puerto 5178, strictPort: true
 ├── svelte.config.js
-├── vite.config.js (o .ts)
 │
-├── packages/
-│   │
-│   ├── core/                    ← CAPA 1
-│   │   ├── package.json         (name: "@midoo/core")
-│   │   ├── tsconfig.json
-│   │   └── src/
-│   │       ├── types.ts         Book, BookMeta, Section, BookId
-│   │       ├── processMarkdown.ts
-│   │       ├── buildBookHtml.ts
-│   │       └── slugify.ts
-│   │
-│   └── persistence/             ← CAPA 3
-│       ├── package.json         (name: "@midoo/persistence")
-│       ├── tsconfig.json
-│       └── src/
-│           ├── interfaces.ts    IBookRepository, ISectionRepository
-│           ├── adapters/
-│           │   ├── IPlatformAdapter.ts
-│           │   ├── ElectronAdapter.ts
-│           │   └── WebAdapter.ts
-│           └── sqlite/
-│               ├── BookRepository.ts
-│               ├── SectionRepository.ts
-│               └── schema.sql
+├── electron/                    ← Proceso principal Electron
+│   ├── main/
+│   │   ├── index.ts             BrowserWindow, ciclo de vida
+│   │   └── register-media-protocol.ts  protocolo midoo-media://
+│   ├── preload/
+│   │   └── index.ts             contextBridge → window.electronAPI
+│   ├── ipc/
+│   │   ├── index.ts             Registro central de handlers
+│   │   └── handlers/
+│   │       ├── app.handlers.ts
+│   │       ├── db.handlers.ts
+│   │       ├── fs.handlers.ts
+│   │       ├── books.handlers.ts
+│   │       ├── sections.handlers.ts
+│   │       ├── blocks.handlers.ts
+│   │       ├── assets.handlers.ts
+│   │       ├── layout.handlers.ts
+│   │       └── exports.handlers.ts
+│   ├── database/
+│   │   ├── connection.ts        Inicialización sql.js + persist()
+│   │   ├── migrations.ts        Esquema versionado (v1–v11+)
+│   │   ├── repositories/        BookRepo, SectionRepo, BlockRepo,
+│   │   │                        AssetRepo, LayoutRepo, ExportRepo
+│   │   └── mappers/             row → dominio (book, section, block, ...)
+│   ├── lib/
+│   │   ├── image-dimensions.ts
+│   │   └── book-media-paths.ts
+│   └── services/
+│       └── asset-import.ts
 │
-├── electron/                    ← proceso principal Electron (Fase 1)
-│   ├── main.ts
-│   ├── preload.ts               contextBridge → window.electronAPI
-│   └── ipc/
-│       └── bookHandlers.ts
-│
-├── src/                         ← CAPA 2 (SvelteKit — App Shell)
+├── src/                         ← App Shell (SvelteKit)
 │   ├── app.html
 │   ├── app.css
 │   ├── lib/
-│   │   ├── platform.ts          getPlatformAdapter() factory
-│   │   └── utils/
-│   │       └── processMarkdown.js  (existente, hasta Fase 0)
+│   │   ├── core/
+│   │   │   ├── domain/          Tipos: block, section, book, layout,
+│   │   │   │                    asset, export (branded IDs, interfaces)
+│   │   │   └── editorial/       Motor editorial puro:
+│   │   │       ├── page-layout-engine.ts      Paginación con flujo de bloques
+│   │   │       ├── page-layout-model.ts       Tipos del motor
+│   │   │       ├── browser-preview-text-measurer.ts  Medición DOM
+│   │   │       ├── document-layout-metrics.ts
+│   │   │       ├── document-page-geometry.ts
+│   │   │       ├── book-styles.ts             Roles tipográficos + CSS
+│   │   │       ├── preview-page-style.ts
+│   │   │       ├── block-type-catalog.ts
+│   │   │       ├── section-type-catalog.ts
+│   │   │       ├── block-layout.ts
+│   │   │       ├── blocks-to-markdown.ts
+│   │   │       ├── image-block-content.ts
+│   │   │       ├── chapter-opening-content.ts
+│   │   │       └── title-page-content.ts
+│   │   ├── persistence/
+│   │   │   ├── index.ts         getPlatformAdapter() factory
+│   │   │   └── adapters/
+│   │   │       ├── IPlatformAdapter.ts   Contrato completo
+│   │   │       ├── ElectronAdapter.ts    Implementación Electron
+│   │   │       ├── WebAdapter.ts         Stub web (sin IPC)
+│   │   │       └── electron.d.ts         Tipos de window.electronAPI
+│   │   ├── services/            Capa de servicio (thin wrappers + lógica)
+│   │   │   ├── books.service.ts
+│   │   │   ├── content.service.ts
+│   │   │   ├── assets.service.ts
+│   │   │   ├── layout.service.ts
+│   │   │   ├── styles.service.ts
+│   │   │   ├── preview-layout.service.ts
+│   │   │   └── export.service.ts        Markdown, EPUB, DOCX, PDF
+│   │   └── components/
+│   │       ├── preview/
+│   │       │   └── BookPagedPreview.svelte
+│   │       ├── SectionTypeSelect.svelte
+│   │       └── MarkdownImportUnifiedModal.svelte
 │   └── routes/
-│       ├── +page.svelte         home: lista de libros
-│       └── book/[slug]/
-│           ├── +page.svelte     editor de maquetación
-│           └── +page.server.js
+│       ├── +layout.svelte       Root layout (app.css)
+│       ├── library/             Lista de libros
+│       ├── books/new/           Crear libro
+│       ├── books/[bookId]/
+│       │   ├── +layout.svelte   Sidebar de navegación del libro
+│       │   ├── overview/        Descripción y metadatos
+│       │   ├── content/         Editor de secciones y bloques
+│       │   ├── assets/          Gestión de imágenes
+│       │   ├── styles/          Estilos editoriales por rol
+│       │   ├── layout/          Formato físico, márgenes, numeración
+│       │   ├── preview/         Vista previa paginada con zoom
+│       │   └── export/          Exportación multiformato
+│       └── export-render/[bookId]/  Ruta headless para printToPDF
 │
-├── static/
-│   └── book-styles.css          estilos Web-to-Print (Paged.js)
-│
-└── content/                     archivos .md (hasta Fase 1, luego SQLite)
-    └── ejemplo-libro.md
+├── dist-electron/               ← Compilados Electron (no commitear)
+│   ├── main.cjs
+│   └── preload.cjs
+├── build/                       ← Build estático SvelteKit (no commitear)
+└── scripts/
+    ├── build-electron.mjs       Compilación con esbuild
+    └── verify-db.mjs            Diagnóstico de base de datos
 ```
 
 ---
 
-## 5. Interfaces y contratos
+## 5. Modelo de dominio
 
-### Tipos principales (`packages/core/src/types.ts`)
+### Entidades principales
 
-```typescript
-// Branded type — evita confundir IDs entre entidades
-declare const BookIdBrand: unique symbol;
-export type BookId = string & { readonly [BookIdBrand]: never };
-
-export interface BookMeta {
-  title:       string;
-  subtitle:    string;
-  author:      string;
-  layout:      'Standard' | 'FullImage';
-  variant:     'light' | 'dark';
-  pageSize:    'A5' | 'Letter';
-  language:    string;
-  description: string;
-  coverImage:  string | null;
-}
-
-export interface Book {
-  id:          BookId;
-  slug:        string;
-  meta:        BookMeta;
-  rawMarkdown: string;
-  createdAt:   Date;
-  updatedAt:   Date;
-}
-
-export interface Section {
-  id:    string;
-  level: 1 | 2;
-  text:  string;
-  slug:  string;
-}
-
-// Resultado de processMarkdown()
-export interface ParsedBook {
-  meta:     BookMeta;
-  content:  string;   // HTML
-  headings: Section[];
-}
+```
+BookProject
+  │
+  ├── LayoutSettings          (1:1) — Formato, tipografía, estilos, TOC, header/footer
+  │
+  ├── DocumentSection[]       (1:N) — Capítulos, prólogos, portadas, etc.
+  │   └── DocumentBlock[]     (1:N) — Unidades de contenido dentro de cada sección
+  │
+  ├── Asset[]                 (1:N) — Imágenes importadas
+  │
+  └── ExportJob[]             (1:N) — Historial de exportaciones
 ```
 
-### Repositorios (`packages/persistence/src/interfaces.ts`)
+### Tipos de sección (`SectionType`)
+`COVER`, `BACK_COVER`, `BLANK`, `TITLE_PAGE`, `CREDITS`, `RIGHTS`, `DEDICATION`,
+`TOC`, `PREFACE`, `PROLOGUE`, `CHAPTER`, `EPILOGUE`, `APPENDIX`, `AUTHOR_NOTE`,
+`BIBLIOGRAPHY`, `INDEX_ANALYTICAL`, `COLOPHON`, `SPECIAL`
 
-```typescript
-import type { Book, BookId } from '@midoo/core';
+### Tipos de bloque (`BlockType`)
+| Tipo | Descripción | Superficie de edición |
+|---|---|---|
+| `HEADING_1`–`4` | Títulos jerárquicos | Campo corto |
+| `PARAGRAPH` | Texto corrido | Textarea grande |
+| `QUOTE` | Cita o bloque destacado | Textarea grande |
+| `CENTERED_PHRASE` | Dedicatoria, epígrafe | Textarea mediana |
+| `IMAGE` | Imagen con caption y alt | Inspector visual |
+| `SEPARATOR` | Línea divisoria | Sin texto |
+| `PAGE_BREAK` | Salto de página explícito | Sin texto |
+| `CHAPTER_OPENING` | Hero de apertura de capítulo (imagen + texto posicionado) | Inspector estructurado |
+| `TITLE_PAGE` | Portadilla con slots fijos (serie, título, autor, editorial) | Inspector estructurado |
 
-export interface IBookRepository {
-  findBySlug(slug: string): Promise<Book | null>;
-  findAll():                Promise<Book[]>;
-  save(book: Book):         Promise<Book>;
-  delete(id: BookId):       Promise<void>;
-}
+### Esquema SQLite (tablas activas)
 
-export interface ISectionRepository {
-  findByBook(bookId: BookId): Promise<Section[]>;
-  saveAll(bookId: BookId, sections: Section[]): Promise<void>;
-}
+| Tabla | Descripción |
+|---|---|
+| `app_settings` | Preferencias clave/valor de la aplicación |
+| `book_projects` | Metadatos del libro (título, autor, idioma) |
+| `document_sections` | Secciones del libro con tipo, orden, opciones TOC |
+| `document_blocks` | Bloques de contenido con tipo, texto, contentJson, layout |
+| `assets` | Imágenes importadas con ruta de almacenamiento |
+| `layout_settings` | Geometría, tipografía, estilos JSON, configuración editorial |
+| `export_jobs` | Historial de exportaciones con estado y ruta de salida |
+
+---
+
+## 6. Sistema de estilos editoriales
+
+Los estilos viven en `layout_settings.styles_json` como un `BookStyleMap` JSON serializado.
+
+### Roles tipográficos (`BookStyleRole`)
+`TITLE`, `HEADING_1`, `HEADING_2`, `HEADING_3`, `HEADING_4`,
+`PARAGRAPH`, `QUOTE`, `CENTERED_PHRASE`, `TOC_ENTRY`,
+`CHAPTER_OPENING_LABEL`, `CHAPTER_OPENING_TITLE`
+
+### Propiedades por rol (`BookStyleDefinition`)
+
+| Propiedad | Tipo | Descripción |
+|---|---|---|
+| `fontSize` | `number` (pt) | Tamaño de fuente |
+| `lineHeight` | `number` | Interlineado (factor) |
+| `textAlign` | `left\|center\|right\|justify` | Alineación |
+| `fontWeight` | `400\|500\|600\|700` | Peso de fuente |
+| `fontFamily` | `string \| null` | Familia tipográfica (null = heredar del libro) |
+| `letterSpacing` | `number` (em) | Espaciado entre letras |
+| `textTransform` | `none\|uppercase\|lowercase\|capitalize` | Transformación de texto |
+| `marginTop` | `number` (pt) | Espacio antes del bloque |
+| `marginBottom` | `number` (pt) | Espacio después del bloque |
+| `color` | `string \| null` | Color del texto |
+| `maxWidth` | `number \| null` (%) | Ancho máximo del bloque |
+
+---
+
+## 7. Motor de paginación
+
+El motor (`page-layout-engine.ts`) es TypeScript puro que opera con **unidades lógicas** (enteros proporcionales al alto de página):
+
+1. **`computeLayoutEngineMetricsForPreviewWidth`** — traduce geometría física (mm) a píxeles a 96 dpi. Define `pageBodyHeightUnits`, `pageBodyWidthUnits`, `charsPerLine`.
+2. **`BrowserPreviewTextMeasurer`** — crea elementos DOM ocultos para medir texto real con la fuente correcta.
+3. **`buildPaginatedLayout`** — itera bloques, estima alturas, decide saltos de página, genera `PaginatedBookResult`.
+4. **`BookPagedPreview.svelte`** — renderiza el resultado con `transform: scale(zoom)` sobre dimensiones físicas reales (96 dpi), garantizando que 1 página en pantalla = 1 página en PDF.
+
+### Reglas especiales de paginación
+- `PAGE_BREAK` → nueva página inmediata
+- `CHAPTER_OPENING`, `TITLE_PAGE` → página dedicada (nueva página antes y después)
+- `IMAGE` con `fillPage: true` → página dedicada
+- `keepTogether`, `pageBreakBefore`, `pageBreakAfter` → controlables por bloque
+
+---
+
+## 8. Sistema de exportación
+
+### Formatos disponibles
+
+| Formato | Motor | Descripción |
+|---|---|---|
+| **PDF Pantalla** | `printToPDF` + BrowserWindow oculto | Dimensiones configuradas por CSS `@page`, RGB, optimizado para pantalla |
+| **PDF Impresión** | `printToPDF` + BrowserWindow oculto | Mismo motor, orientado a formato físico del libro |
+| **EPUB** | `jszip` | EPUB 3 reflowable con NCX EPUB 2. TOC navegable, imágenes embebidas |
+| **DOCX** | `docx` | Word compatible. Estilos de párrafo, headings, imágenes embebidas |
+| **Markdown** | Serialización pura JS | Frontmatter YAML, un archivo con todas las secciones |
+
+### Flujo PDF (export-render)
 ```
-
-### Platform Adapter (`packages/persistence/src/adapters/IPlatformAdapter.ts`)
-
-```typescript
-export interface IPlatformAdapter {
-  readFile(path: string):                    Promise<string>;
-  writeFile(path: string, content: string):  Promise<void>;
-  listFiles(dir: string, ext: string):       Promise<string[]>;
-  openFilePicker():                          Promise<string | null>;
-  showSaveDialog(defaultName: string):       Promise<string | null>;
-}
-```
-
-### Factory de plataforma (`src/lib/platform.ts`)
-
-```typescript
-import type { IPlatformAdapter } from '@midoo/persistence';
-
-export async function getPlatformAdapter(): Promise<IPlatformAdapter> {
-  if (typeof window !== 'undefined' && (window as any).electronAPI) {
-    const { ElectronAdapter } = await import('@midoo/persistence/adapters/ElectronAdapter');
-    return new ElectronAdapter((window as any).electronAPI);
-  }
-  const { WebAdapter } = await import('@midoo/persistence/adapters/WebAdapter');
-  return new WebAdapter();
-}
-```
-
-### Electron preload (contextBridge, `electron/preload.ts`)
-
-```typescript
-import { contextBridge, ipcRenderer } from 'electron';
-
-contextBridge.exposeInMainWorld('electronAPI', {
-  readFile:   (path: string) =>
-    ipcRenderer.invoke('fs:readFile', path),
-  writeFile:  (path: string, content: string) =>
-    ipcRenderer.invoke('fs:writeFile', path, content),
-  listFiles:  (dir: string, ext: string) =>
-    ipcRenderer.invoke('fs:listFiles', dir, ext),
-  openPicker: () =>
-    ipcRenderer.invoke('dialog:openFile'),
-  saveDialog: (name: string) =>
-    ipcRenderer.invoke('dialog:saveFile', name),
-});
+exportPdf(bookId, format)
+  → createExportJob (status: pending)
+  → IPC exports:renderPdf
+      → BrowserWindow oculto carga /export-render/[bookId]?format=screen|print
+      → Espera window.__exportReady (Promise expuesta por la ruta)
+      → win.show() off-screen (activa GPU compositor)
+      → printToPDF({ margins: none, printBackground: true })
+      → win.destroy()
+  → IPC exports:saveFile (dialog nativo)
+  → updateExportJob (status: completed, outputPath)
 ```
 
 ---
 
-## 6. Reglas de desacoplamiento
+## 9. Protocolo de media local
 
-Estas reglas son **no negociables**. Un PR que las viole debe ser rechazado.
+Las imágenes del libro se sirven con un protocolo personalizado de Electron:
+
+```
+midoo-media://r/{bookId}/{storagePath}
+```
+
+- Registrado en `register-media-protocol.ts` antes de que `ready-to-show` se dispare.
+- Permite usar las imágenes en el renderer (preview, inspector) y en la ruta de export-render con `fetch()`.
+- Almacenadas en `{userData}/midoo-books/assets/{bookId}/`.
+
+---
+
+## 10. Reglas de desacoplamiento
+
+Estas reglas son **no negociables**.
 
 | Capa | Puede importar | NO puede importar |
 |---|---|---|
-| **Core Editorial** (`packages/core`) | stdlib TS, librerías puras (gray-matter, marked) | `fs`, `path`, `electron`, `better-sqlite3`, `svelte`, DOM APIs (`window`, `document`) |
-| **App Shell** (`src/`) | `@midoo/core`, SvelteKit, Svelte, Paged.js, `IPlatformAdapter` | `better-sqlite3`, módulos Node.js nativos, `electron` directo |
-| **Persistencia** (`packages/persistence`) | `@midoo/core`, `better-sqlite3`, `fs`, `path` | Módulos de SvelteKit (`$app/...`), componentes `.svelte`, Paged.js |
-| **Electron main** (`electron/`) | `electron`, `better-sqlite3`, `fs`, `@midoo/persistence` | Svelte, SvelteKit, Paged.js |
-
-### Cómo verificarlo
-
-```bash
-# El Core no debe tener dependencias de runtime más allá de gray-matter y marked
-cat packages/core/package.json | grep dependencies
-
-# Buscar imports prohibidos en Core
-grep -r "from 'fs'" packages/core/src/
-grep -r "from 'electron'" packages/core/src/
-```
+| **Core Editorial** (`src/lib/core/`) | stdlib TS, librerías puras | `fs`, `path`, `electron`, `sql.js`, `svelte`, `$app/*` |
+| **App Shell** (`src/routes/`, `src/lib/services/`) | `src/lib/core/`, SvelteKit, `IPlatformAdapter` | `sql.js`, módulos Node.js nativos, `electron` directo |
+| **Persistencia** (`src/lib/persistence/`) | `src/lib/core/`, interfaces | SvelteKit `$app/*`, componentes `.svelte` |
+| **Electron main** (`electron/`) | `electron`, `sql.js`, `fs`, dominio de `src/lib/core/` | Svelte, SvelteKit, `$app/*` |
 
 ---
 
-## 7. Roadmap técnico
+## 11. Roadmap
 
-### Fase 0 — Estructura TypeScript *(próxima)*
+### ✅ Completado
 
-**Objetivo:** monorepo funcional con Core tipado. La app web debe seguir corriendo sin cambios visibles.
+**Infraestructura**
+- Proyecto Electron + SvelteKit + TypeScript
+- sql.js SQLite con migraciones versionadas
+- contextBridge (preload) + IPC handlers completos
+- Protocolo `midoo-media://` para assets locales
+- Build con esbuild + electron-builder
 
-- [ ] Agregar `workspaces` al `package.json` raíz
-- [ ] Crear `packages/core/` con `tsconfig.json` + `package.json`
-- [ ] Migrar `processMarkdown.js` → `packages/core/src/processMarkdown.ts`
-- [ ] Extraer `buildBookHtml()` de `+page.svelte` → `packages/core/src/buildBookHtml.ts`
-- [ ] Definir todos los tipos en `packages/core/src/types.ts`
-- [ ] Actualizar `+page.svelte` y `+page.server.js` para importar desde `@midoo/core`
-- [ ] Verificar `npm run dev` y `npm run build` sin errores
+**Módulos de la app**
+- `Biblioteca` — listado, creación y gestión de libros
+- `Contenido` — editor de secciones y bloques con inspector lateral
+  - Todos los tipos de bloque incluyendo `CHAPTER_OPENING` y `TITLE_PAGE`
+  - Drag & drop para reordenar secciones y bloques
+  - Importación desde Markdown (sección individual o libro completo)
+  - Comando `/` para insertar bloques desde el editor inline
+- `Assets` — importación, visualización y gestión de imágenes
+- `Estilos` — configuración de roles tipográficos (fontSize, fontFamily, textTransform, etc.)
+- `Maqueta` — formato físico de página, márgenes, numeración, TOC, cabecera/pie
+- `Vista Previa` — preview paginado a dimensiones físicas reales con zoom interactivo
+- `Exportar` — 5 formatos (PDF pantalla, PDF impresión, EPUB, DOCX, Markdown) con historial
 
-**Criterio de éxito:** `packages/core/src/` no tiene ningún import de `fs`, `electron` ni `svelte`.
-
----
-
-### Fase 1 — MVP Desktop Windows *(~4 semanas)*
-
-**Objetivo:** instalador `.exe` funcional con apertura de archivos .md desde el sistema de archivos local.
-
-- [ ] Instalar `electron`, `electron-builder`, `concurrently`
-- [ ] Crear `electron/main.ts` (BrowserWindow apuntando al renderer SvelteKit)
-- [ ] Crear `electron/preload.ts` (contextBridge con electronAPI)
-- [ ] Crear `electron/ipc/bookHandlers.ts` (handlers fs:readFile, fs:listFiles, dialog:openFile)
-- [ ] Implementar `ElectronAdapter` en `packages/persistence/`
-- [ ] Crear `packages/persistence/src/sqlite/schema.sql` y `BookRepository.ts`
-- [ ] Reemplazar `+page.server.js` (SSR) por `getPlatformAdapter()` en cliente cuando corre en Electron
-- [ ] Configurar `electron-builder` para generar `.exe` NSIS
-- [ ] Prueba en Windows: abrir libro, navegar páginas, exportar PDF
-
-**Criterio de éxito:** un usuario sin Node.js instalado puede instalar y usar MIDOO BOOKS en Windows.
+**Motor editorial**
+- Motor de paginación propio con medición DOM
+- Zoom de vista previa con `transform: scale()` — 85% por defecto, ajustable
+- Sincronización automática de preview al navegar desde cualquier módulo
 
 ---
 
-### Fase 2 — Editor Estructurado *(~6 semanas)*
+### 🔄 En progreso / Mejoras pendientes
 
-**Objetivo:** CRUD completo de libros desde la app, sin editar .md manualmente.
-
-- [ ] Panel de propiedades con edición de todos los campos `BookMeta`
-- [ ] Editor de secciones/capítulos (agregar, reordenar, eliminar)
-- [ ] Importar .md existente → parsear → guardar en SQLite
-- [ ] Exportar libro como .md (round-trip)
-- [ ] Historial de versiones simplificado (snapshot por guardado)
-- [ ] Home: biblioteca de libros con miniatura de portada
-
-**Criterio de éxito:** flujo completo sin tocar el sistema de archivos manualmente.
+- **Fidelidad preview→PDF**: los `PREVIEW_FLOW_PAD_*` añaden padding extra en la vista previa que no existe en el PDF. Reducirlos mejoraría la correspondencia.
+- **Medición por fuente**: el `BrowserPreviewTextMeasurer` usa Georgia como fuente base. Si se configura Courier u otra fuente en el rol, las métricas de paginación son aproximadas.
 
 ---
 
-### Fase 3 — Mac / Linux *(~3 semanas)*
+### 🗓️ Próximas fases
 
-**Objetivo:** misma experiencia en las 3 plataformas principales.
+**Fase A — Diseño de página avanzado**
+- Opción C ampliada: plantillas de sección con slots de posición libre (libre-canvas ligero)
+- Soporte de imágenes de fondo por sección (no solo CHAPTER_OPENING)
+- Sangrado real en PDF de imprenta (bleed + crop marks)
 
-- [ ] Certificado de firma para macOS (notarización Apple)
-- [ ] Build `.dmg` (macOS) y `.AppImage`/`.deb` (Linux)
-- [ ] Ajustes de paths multiplataforma (`path.join`, no hardcoded `/`)
-- [ ] CI/CD con GitHub Actions (build matrix: windows-latest, macos-latest, ubuntu-latest)
-- [ ] Auto-update via `electron-updater`
+**Fase B — Distribución multiplataforma**
+- Build `.dmg` (macOS) con notarización Apple
+- Build `.AppImage` / `.deb` (Linux)
+- CI/CD con GitHub Actions (matrix: windows-latest, macos-latest, ubuntu-latest)
+- Auto-update vía `electron-updater`
 
-**Criterio de éxito:** el mismo código fuente genera instaladores nativos para los 3 sistemas operativos.
+**Fase C — Colaboración y portabilidad**
+- Exportar/importar proyecto como `.midoo` (zip con SQLite + assets)
+- Historial de versiones simplificado (snapshot por guardado)
+- Modo web (SvelteKit puro con File System Access API para demo/colaboración)
 
----
-
-### Fase 4 — Capacidades avanzadas *(roadmap largo plazo)*
-
-- [ ] Sistema de plantillas (templates de layout reutilizables)
-- [ ] Exportación EPUB (epub.js o Calibre CLI)
-- [ ] Colaboración: exportar/importar proyecto como `.midoo` (zip)
-- [ ] Capacitor (evaluación para Android/iOS) — requiere adaptar renderer a mobile
-- [ ] Modo web (SvelteKit puro con File System Access API) — opcional
-
----
-
-## 8. Principios técnicos
-
-Estas decisiones guían cada elección de implementación.
-
-### 1. Contenido y presentación son mundos separados
-El Markdown define el contenido. El CSS define la apariencia. La app nunca mezcla ambos en el mismo artefacto. `buildBookHtml()` en Core construye el HTML; `book-styles.css` define cómo se ve. Nunca hay estilos inline en el HTML generado.
-
-### 2. El Core no sabe que existe una UI
-`packages/core` debe poder ejecutarse en un script de Node.js puro, en un test unitario, o en un worker sin browser. Esto garantiza testabilidad y portabilidad.
-
-### 3. Paged.js es un detalle de implementación del App Shell
-El resto de la app solo conoce "páginas HTML". Paged.js transforma ese HTML en páginas físicas. Si mañana Paged.js se reemplaza por otra herramienta, solo cambia el App Shell, no el Core ni la Persistencia.
-
-### 4. SQLite es local-first
-No hay servidor, no hay cloud, no hay cuenta de usuario. Los datos del autor son del autor y viven en su máquina. La sincronización en la nube es una característica futura opt-in, no una dependencia.
-
-### 5. Electron es un detalle de empaquetado
-El renderer SvelteKit no sabe si está dentro de Electron o en un browser. `getPlatformAdapter()` es el único punto de entrada al mundo nativo. Esto permite correr la app en web sin Electron para demos o colaboración ligera.
-
-### 6. Tipado estricto en las fronteras entre capas
-Las interfaces (`IBookRepository`, `IPlatformAdapter`) son contratos tipados. Los adaptadores concretos implementan esos contratos. El App Shell solo programa contra las interfaces, nunca contra implementaciones concretas.
-
-### 7. DOM de Paged.js es inmutable para la app
-Una vez que Paged.js renderiza las páginas, la app solo modifica `display`, `float` y `margin` de los nodos `.pagedjs_page`. Nunca `remove()`, `cloneNode()`, ni atributos internos. Paged.js mantiene referencias internas que se corrompen con manipulación directa del DOM.
+**Fase D — Capacidades editoriales avanzadas**
+- Sistema de plantillas de libro reutilizables
+- Estilos de párrafo adicionales: letra capital, verso/poesía, nota al pie
+- Generación de ISBN/barcode embebible en contraportada
+- Preflight report para PDF de imprenta
 
 ---
 
-## Estado actual (Fase pre-0)
+## 12. Estado actual (2026-05-30)
 
-| Elemento | Estado |
-|---|---|
-| SvelteKit + Svelte 5 | ✅ Funcionando |
-| Paged.js (preview + navegación) | ✅ Funcionando |
-| Toolbar + thumbnails + panel propiedades | ✅ Funcionando |
-| gray-matter + marked | ✅ Funcionando |
-| book-styles.css (Web-to-Print) | ✅ Funcionando |
-| TypeScript en el proyecto | ❌ No configurado |
-| packages/core | ❌ No existe |
-| packages/persistence | ❌ No existe |
-| Electron | ❌ No configurado |
-| SQLite | ❌ No configurado |
-| tsconfig.json | ❌ No existe |
+| Módulo | Estado | Notas |
+|---|---|---|
+| Electron + SvelteKit | ✅ Funcionando | Puerto 5178, build con esbuild |
+| sql.js SQLite | ✅ Funcionando | Migraciones v1–v11 |
+| Biblioteca (CRUD libros) | ✅ Funcionando | |
+| Editor de contenido | ✅ Funcionando | 13 tipos de bloque |
+| Assets | ✅ Funcionando | Protocolo midoo-media:// |
+| Estilos editoriales | ✅ Funcionando | fontFamily, textTransform incluidos |
+| Maqueta (layout) | ✅ Funcionando | Preset A5/Trade/Carta/A4 + personalizado |
+| Vista previa paginada | ✅ Funcionando | Zoom físico 40%–150% |
+| Exportación PDF | ✅ Funcionando | printToPDF vía export-render |
+| Exportación EPUB | ✅ Funcionando | EPUB3 + NCX, imágenes embebidas |
+| Exportación DOCX | ✅ Funcionando | Packer.toBlob() (renderer-compatible) |
+| Exportación Markdown | ✅ Funcionando | Frontmatter YAML |
+| Bloque TITLE_PAGE | ✅ Funcionando | 5 slots posicionados |
+| Mac / Linux builds | ❌ Pendiente | Fase B |
+| Auto-update | ❌ Pendiente | Fase B |
+| Plantillas reutilizables | ❌ Pendiente | Fase D |

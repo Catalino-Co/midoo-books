@@ -25,6 +25,8 @@
   let defaultStyles = $state<BookStyleMap | null>(null);
   let selectedRole = $state<BookStyleRole>('PARAGRAPH');
 
+  import type { BookStyleTextTransform } from '$lib/core/editorial/book-styles';
+
   const textAlignOptions = [
     { value: 'left', label: 'Izquierda' },
     { value: 'center', label: 'Centrado' },
@@ -38,6 +40,35 @@
     { value: 600, label: '600 · Semibold' },
     { value: 700, label: '700 · Bold' },
   ] as const;
+
+  const textTransformOptions: { value: BookStyleTextTransform; label: string }[] = [
+    { value: 'none',       label: 'Normal' },
+    { value: 'uppercase',  label: 'MAYÚSCULAS' },
+    { value: 'lowercase',  label: 'minúsculas' },
+    { value: 'capitalize', label: 'Primera Mayúscula' },
+  ];
+
+  // Fuentes literarias disponibles en la mayoría de sistemas (Windows / macOS)
+  interface FontPreset { label: string; value: string; category: string }
+  const FONT_PRESETS: FontPreset[] = [
+    // Serif clásico
+    { label: 'Georgia',            value: 'Georgia, serif',                      category: 'Serif' },
+    { label: 'Garamond',           value: 'Garamond, "EB Garamond", serif',      category: 'Serif' },
+    { label: 'Palatino',           value: '"Palatino Linotype", Palatino, serif', category: 'Serif' },
+    { label: 'Book Antiqua',       value: '"Book Antiqua", Palatino, serif',      category: 'Serif' },
+    { label: 'Times New Roman',    value: '"Times New Roman", Times, serif',      category: 'Serif' },
+    { label: 'Cambria',            value: 'Cambria, "Hoefler Text", serif',       category: 'Serif' },
+    // Tipografía a máquina
+    { label: 'Courier New',        value: '"Courier New", Courier, monospace',    category: 'Monoespaciada' },
+    { label: 'Lucida Console',     value: '"Lucida Console", Monaco, monospace',  category: 'Monoespaciada' },
+    { label: 'Consolas',           value: 'Consolas, "Courier New", monospace',   category: 'Monoespaciada' },
+    // Sans-serif moderno
+    { label: 'Helvetica / Arial',  value: '"Helvetica Neue", Arial, sans-serif',  category: 'Sans-serif' },
+    { label: 'Calibri',            value: 'Calibri, "Gill Sans", sans-serif',     category: 'Sans-serif' },
+    { label: 'Trebuchet MS',       value: '"Trebuchet MS", sans-serif',           category: 'Sans-serif' },
+    { label: 'Verdana',            value: 'Verdana, Geneva, sans-serif',          category: 'Sans-serif' },
+    { label: 'Futura / Century Gothic', value: '"Century Gothic", Futura, sans-serif', category: 'Sans-serif' },
+  ];
 
   let currentStyle = $derived(styles?.[selectedRole] ?? null);
   let currentMeta = $derived(BOOK_STYLE_ROLE_CATALOG.find(entry => entry.role === selectedRole) ?? BOOK_STYLE_ROLE_CATALOG[0]);
@@ -293,6 +324,71 @@
           />
         </div>
 
+        <!-- ── Tipografía extendida ─────────────────────────────────────── -->
+        <div class="field-section-title">Tipografía</div>
+
+        <div class="field">
+          <label for="text-transform">Transformación de texto</label>
+          <select
+            id="text-transform"
+            class="input"
+            value={currentStyle.textTransform ?? 'none'}
+            onchange={(e) => patchSelectedStyle({ textTransform: (e.currentTarget as HTMLSelectElement).value as BookStyleTextTransform })}
+          >
+            {#each textTransformOptions as opt}
+              <option value={opt.value}>{opt.label}</option>
+            {/each}
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Familia tipográfica</label>
+          <p class="field-hint">
+            <strong>null</strong> = hereda la fuente del libro. Elige un preset o escribe una familia personalizada.
+          </p>
+          <!-- Chips de presets agrupados -->
+          <div class="font-preset-groups">
+            {#each ['Serif', 'Monoespaciada', 'Sans-serif'] as category}
+              <div class="font-preset-group">
+                <span class="font-preset-group__label">{category}</span>
+                <div class="font-preset-chips">
+                  {#each FONT_PRESETS.filter(f => f.category === category) as preset}
+                    <button
+                      type="button"
+                      class="font-chip"
+                      class:font-chip--active={currentStyle.fontFamily === preset.value}
+                      style="font-family:{preset.value}"
+                      onclick={() => patchSelectedStyle({
+                        fontFamily: currentStyle.fontFamily === preset.value ? null : preset.value
+                      })}
+                      title={preset.value}
+                    >{preset.label}</button>
+                  {/each}
+                </div>
+              </div>
+            {/each}
+          </div>
+          <!-- Input para familia personalizada -->
+          <input
+            id="font-family-custom"
+            class="input input--mono"
+            type="text"
+            value={currentStyle.fontFamily ?? ''}
+            placeholder='null (hereda) — o escribe: "Playfair Display", serif'
+            oninput={(e) => {
+              const raw = (e.currentTarget as HTMLInputElement).value.trim();
+              patchSelectedStyle({ fontFamily: raw || null });
+            }}
+          />
+          {#if currentStyle.fontFamily}
+            <button
+              type="button"
+              class="font-clear-btn"
+              onclick={() => patchSelectedStyle({ fontFamily: null })}
+            >✕ Limpiar (heredar fuente del libro)</button>
+          {/if}
+        </div>
+
         <div class="sample-card">
           <span class="sample-card__eyebrow">Vista rápida</span>
           <div class="sample-card__sheet">
@@ -505,6 +601,28 @@
     letter-spacing: 0.08em;
     color: rgba(255,255,255,0.52);
   }
+  .field-hint {
+    font-size: 11px;
+    color: rgba(255,255,255,0.35);
+    margin: 0 0 8px;
+    line-height: 1.5;
+  }
+  .field-hint strong {
+    color: rgba(122,184,232,0.8);
+    font-family: monospace;
+  }
+  /* Separador de sección en el editor */
+  .field-section-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: rgba(122,184,232,0.55);
+    border-top: 1px solid rgba(255,255,255,0.07);
+    padding-top: 14px;
+    margin-bottom: 12px;
+    margin-top: 4px;
+  }
   .input {
     width: 100%;
     border-radius: 10px;
@@ -515,6 +633,63 @@
     font-size: 13px;
     color-scheme: dark;
   }
+  .input--mono {
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    margin-top: 8px;
+  }
+  /* ── Fuentes: grupos de presets ─────────────────────────────────────── */
+  .font-preset-groups {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .font-preset-group__label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(255,255,255,0.3);
+    display: block;
+    margin-bottom: 6px;
+  }
+  .font-preset-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .font-chip {
+    padding: 5px 11px;
+    border-radius: 7px;
+    border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.04);
+    color: rgba(255,255,255,0.65);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.1s, border-color 0.1s, color 0.1s;
+    line-height: 1.3;
+  }
+  .font-chip:hover {
+    background: rgba(255,255,255,0.09);
+    color: rgba(255,255,255,0.9);
+    border-color: rgba(255,255,255,0.22);
+  }
+  .font-chip--active {
+    background: rgba(122,184,232,0.15) !important;
+    border-color: rgba(122,184,232,0.55) !important;
+    color: #c8e6ff !important;
+  }
+  .font-clear-btn {
+    margin-top: 6px;
+    font-size: 11px;
+    color: rgba(220,100,100,0.75);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    font-family: inherit;
+  }
+  .font-clear-btn:hover { color: #e07070; }
   .sample-card {
     margin-top: 20px;
     border-radius: 16px;

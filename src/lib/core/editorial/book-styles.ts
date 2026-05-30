@@ -21,13 +21,17 @@ export const BOOK_STYLE_ROLE_VALUES = [
 export type BookStyleRole = (typeof BOOK_STYLE_ROLE_VALUES)[number];
 
 export type BookStyleTextAlign = 'left' | 'center' | 'right' | 'justify';
+export type BookStyleTextTransform = 'none' | 'uppercase' | 'lowercase' | 'capitalize';
 
 export interface BookStyleDefinition {
   fontSize: number;
   lineHeight: number;
   textAlign: BookStyleTextAlign;
   fontWeight: 400 | 500 | 600 | 700;
+  /** null = heredar la fuente del libro (bodyFontFamily / headingFontFamily en LayoutSettings). */
+  fontFamily: string | null;
   letterSpacing: number;
+  textTransform: BookStyleTextTransform;
   marginTop: number;
   marginBottom: number;
   color: string | null;
@@ -141,6 +145,10 @@ function isFontWeight(value: unknown): value is BookStyleDefinition['fontWeight'
   return value === 400 || value === 500 || value === 600 || value === 700;
 }
 
+function isTextTransform(value: unknown): value is BookStyleTextTransform {
+  return value === 'none' || value === 'uppercase' || value === 'lowercase' || value === 'capitalize';
+}
+
 function normalizeStyleDefinition(
   base: BookStyleDefinition,
   raw: Partial<BookStyleDefinition> | undefined,
@@ -157,12 +165,19 @@ function normalizeStyleDefinition(
       : base.color;
   const maxWidth = typeof raw?.maxWidth === 'number' ? raw.maxWidth : raw?.maxWidth === null ? null : base.maxWidth;
 
+  // fontFamily: null = heredar; string vacío se trata como null
+  const fontFamily = 'fontFamily' in (raw ?? {})
+    ? (typeof raw?.fontFamily === 'string' ? raw.fontFamily.trim() || null : null)
+    : base.fontFamily;
+
   return {
     fontSize: clamp(fontSize, 8, 72),
     lineHeight: clamp(lineHeight, 1, 2.4),
     textAlign: isTextAlign(raw?.textAlign) ? raw.textAlign : base.textAlign,
     fontWeight: isFontWeight(raw?.fontWeight) ? raw.fontWeight : base.fontWeight,
+    fontFamily,
     letterSpacing: clamp(letterSpacing, -0.1, 0.4),
+    textTransform: isTextTransform(raw?.textTransform) ? raw.textTransform : base.textTransform,
     marginTop: clamp(marginTop, 0, 72),
     marginBottom: clamp(marginBottom, 0, 72),
     color,
@@ -183,7 +198,9 @@ export function buildDefaultBookStyles(
       lineHeight: 1.14,
       textAlign: 'center',
       fontWeight: 700,
+      fontFamily: null,
       letterSpacing: 0.01,
+      textTransform: 'none',
       marginTop: 10,
       marginBottom: 12,
       color: null,
@@ -194,7 +211,9 @@ export function buildDefaultBookStyles(
       lineHeight: 1.18,
       textAlign: 'left',
       fontWeight: 700,
+      fontFamily: null,
       letterSpacing: 0,
+      textTransform: 'none',
       marginTop: 10,
       marginBottom: 8,
       color: null,
@@ -205,7 +224,9 @@ export function buildDefaultBookStyles(
       lineHeight: 1.22,
       textAlign: 'left',
       fontWeight: 600,
+      fontFamily: null,
       letterSpacing: 0,
+      textTransform: 'none',
       marginTop: 8,
       marginBottom: 6,
       color: null,
@@ -216,7 +237,9 @@ export function buildDefaultBookStyles(
       lineHeight: 1.3,
       textAlign: 'left',
       fontWeight: 600,
+      fontFamily: null,
       letterSpacing: 0,
+      textTransform: 'none',
       marginTop: 6,
       marginBottom: 4,
       color: null,
@@ -227,7 +250,9 @@ export function buildDefaultBookStyles(
       lineHeight: 1.35,
       textAlign: 'left',
       fontWeight: 600,
+      fontFamily: null,
       letterSpacing: 0.04,
+      textTransform: 'none',
       marginTop: 5,
       marginBottom: 3,
       color: null,
@@ -238,7 +263,9 @@ export function buildDefaultBookStyles(
       lineHeight: bodyLineHeight,
       textAlign: 'justify',
       fontWeight: 400,
+      fontFamily: null,
       letterSpacing: 0,
+      textTransform: 'none',
       marginTop: 0,
       marginBottom: paragraphSpacing,
       color: null,
@@ -249,7 +276,9 @@ export function buildDefaultBookStyles(
       lineHeight: Math.min(2.2, bodyLineHeight + 0.03),
       textAlign: 'left',
       fontWeight: 400,
+      fontFamily: null,
       letterSpacing: 0,
+      textTransform: 'none',
       marginTop: 6,
       marginBottom: 8,
       color: '#4b4b54',
@@ -260,7 +289,9 @@ export function buildDefaultBookStyles(
       lineHeight: Math.min(2.2, bodyLineHeight + 0.05),
       textAlign: 'center',
       fontWeight: 400,
+      fontFamily: null,
       letterSpacing: 0.01,
+      textTransform: 'none',
       marginTop: 10,
       marginBottom: 10,
       color: null,
@@ -271,7 +302,9 @@ export function buildDefaultBookStyles(
       lineHeight: 1.24,
       textAlign: 'left',
       fontWeight: 400,
+      fontFamily: null,
       letterSpacing: 0,
+      textTransform: 'none',
       marginTop: 2,
       marginBottom: 2,
       color: null,
@@ -282,7 +315,9 @@ export function buildDefaultBookStyles(
       lineHeight: 1.2,
       textAlign: 'left',
       fontWeight: 500,
+      fontFamily: null,
       letterSpacing: 0.08,
+      textTransform: 'none',
       marginTop: 0,
       marginBottom: 4,
       color: null,
@@ -293,7 +328,9 @@ export function buildDefaultBookStyles(
       lineHeight: 1.1,
       textAlign: 'left',
       fontWeight: 700,
+      fontFamily: null,
       letterSpacing: 0,
+      textTransform: 'none',
       marginTop: 0,
       marginBottom: 0,
       color: null,
@@ -473,7 +510,9 @@ export function buildBookStyleCss(
     `text-align:${style.textAlign}`,
     `font-weight:${style.fontWeight}`,
     `letter-spacing:${style.letterSpacing}em`,
+    `text-transform:${style.textTransform ?? 'none'}`,
   ];
+  if (style.fontFamily) parts.push(`font-family:${style.fontFamily}`);
   if (options.includeMargins !== false) {
     parts.push(`margin-top:${style.marginTop}pt`);
     parts.push(`margin-bottom:${style.marginBottom}pt`);
