@@ -82,8 +82,12 @@
     bookStyleRoleLabel,
     resolveEffectiveBookStyleInfoForBlock,
     buildResolvedBookStyleDebug,
+    resolveBookStyles,
+    buildBookStyleCss,
+    type BookStyleMap,
     type ResolvedBookStyleInfo,
   } from '$lib/services/styles.service';
+  import { resolveBookStyleRoleForBlock } from '$lib/core/editorial/book-styles';
   import SectionTypeSelect from '$lib/components/SectionTypeSelect.svelte';
   import MarkdownImportUnifiedModal from '$lib/components/MarkdownImportUnifiedModal.svelte';
   import type {
@@ -129,6 +133,335 @@
   let focusMode              = $state(false);
   let inspectorTab           = $state<'block' | 'format'>('block');
   let sectionBlockCounts     = $state<Record<string, number>>({});
+
+  // ── Modo de edición ───────────────────────────────────────────────────
+  type EditorMode = 'write' | 'layout';
+  const EDITOR_MODE_KEY = 'midoo-editor-mode';
+
+  function loadEditorMode(): EditorMode {
+    if (typeof localStorage === 'undefined') return 'layout';
+    const saved = localStorage.getItem(EDITOR_MODE_KEY);
+    return saved === 'write' ? 'write' : 'layout';
+  }
+
+  let editorMode = $state<EditorMode>(loadEditorMode());
+
+  function setEditorMode(mode: EditorMode) {
+    editorMode = mode;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(EDITOR_MODE_KEY, mode);
+    }
+  }
+
+  // ── Estadísticas de palabras ──────────────────────────────────────────
+  /** Cuenta palabras en un string de texto. */
+  function wordCount(text: string): number {
+    const t = text?.trim();
+    return t ? t.split(/\s+/).length : 0;
+  }
+
+  /**
+   * Caché de word count por sección — se actualiza cada vez que se cargan
+   * los bloques de una sección, acumulando datos mientras el usuario navega.
+   */
+  let sectionWordCounts = $state<Record<string, number>>({});
+
+  /** Palabras en la sección actualmente cargada. */
+  let currentSectionWordCount = $derived(
+    blocks.reduce((sum, b) => sum + wordCount(b.contentText), 0)
+  );
+
+  /** Total acumulado de palabras en todas las secciones visitadas. */
+  let bookWordCount = $derived(
+    Object.values(sectionWordCounts).reduce((sum, c) => sum + c, 0)
+  );
+
+  /** Páginas estimadas (≈250 palabras/página en formato estándar). */
+  function estimatedPages(words: number): number {
+    return Math.max(1, Math.round(words / 250));
+  }
+
+  // Actualiza el caché de word count cuando cambian los bloques cargados.
+  // IMPORTANTE: usar mutación de propiedad (obj[key] = v), NO spread ({ ...obj })
+  // para evitar que Svelte 5 registre sectionWordCounts como dependencia del effect
+  // y genere un loop reactivo infinito.
+  $effect(() => {
+    const count = currentSectionWordCount;  // dependencia intencional
+    const id    = selectedSectionId;        // dependencia intencional
+    if (id && !loadingBlocks) {
+      sectionWordCounts[id] = count;        // mutación directa — no crea dependencia de lectura
+    }
+  });
+
+  // ── Write Mode — estado ──────────────────────────────────────────────────
+
+  /** ID del bloque al que hay que mover el foco tras crear/eliminar */
+  let pendingFocusBlockId    = $state<string | null>(null);
+  /** Inspector visible temporalmente en write mode (para bloques no-texto) */
+  let showWriteInspector     = $state(false);
+  /** Timers de guardado por bloque en write mode */
+  const writeTimers          = new Map<string, ReturnType<typeof setTimeout>>();
+
+  /** Estilos del libro resueltos para write mode */
+  let bookStyles = $derived<BookStyleMap | null>(
+    bookLayoutSettings ? resolveBookStyles(bookLayoutSettings) : null
+  );
+
+  // Enfocar el bloque pendiente tras cualquier cambio reactivo
+  $effect(() => {
+    if (!pendingFocusBlockId) return;
+    const id = pendingFocusBlockId;
+    // Dar un tick para que el DOM se actualice
+    setTimeout(() => {
+      const el = document.getElementById(`wbt-${id}`) as HTMLTextAreaElement | null;
+      if (el) {
+        el.focus();
+        const len = el.value.length;
+        el.selectionStart = len;
+        el.selectionEnd   = len;
+      }
+      pendingFocusBlockId = null;
+    }, 0);
+  });
+
+  // ── Write Mode — Svelte action: auto-resize textarea ─────────────────────
+  function autoResizeAction(node: HTMLTextAreaElement, _text: string) {
+    function resize() {
+      node.style.height = '0';
+      node.style.height = node.scrollHeight + 'px';
+    }
+    resize();
+    node.addEventListener('input', resize);
+    return {
+      update(_: string) {
+        if (document.activeElement !== node) resize();
+      },
+      destroy() { node.removeEventListener('input', resize); },
+    };
+  }
+
+  // ── Write Mode — helpers visuales ────────────────────────────────────────
+
+  /** Etiqueta del marcador en el margen izquierdo */
+  function writeGutterLabel(type: BlockType): string {
+    switch (type) {
+      case 'HEADING_1':       return 'H1';
+      case 'HEADING_2':       return 'H2';
+      case 'HEADING_3':       return 'H3';
+      case 'HEADING_4':       return 'H4';
+      case 'PARAGRAPH':       return '¶';
+      case 'QUOTE':           return '"';
+      case 'CENTERED_PHRASE': return '⊙';
+      case 'SEPARATOR':       return '—';
+      case 'PAGE_BREAK':      return '↵';
+      case 'IMAGE':           return '▣';
+      case 'CHAPTER_OPENING': return '◈';
+      case 'TITLE_PAGE':      return '◻';
+      default:                return '·';
+    }
+  }
+
+  /** CSS inline para la textarea de un bloque en write mode */
+  function getWriteBlockCss(block: DocumentBlock): string {
+    if (!bookStyles || !selectedSection) return '';
+    const role = resolveBookStyleRoleForBlock(selectedSection.sectionType, block);
+    if (!role) return '';
+    return buildBookStyleCss(bookStyles[role], { includeMargins: false, includeMaxWidth: false });
+  }
+
+  /** Texto placeholder según tipo de bloque */
+  function writeBlockPlaceholder(type: BlockType, index: number): string {
+    if (index === 0 && type === 'PARAGRAPH') return 'Comienza a escribir…';
+    switch (type) {
+      case 'HEADING_1': return 'Título del capítulo';
+      case 'HEADING_2': return 'Subtítulo';
+      case 'HEADING_3': return 'Encabezado';
+      case 'HEADING_4': return 'Epígrafe o etiqueta';
+      case 'QUOTE':     return 'Cita o texto destacado…';
+      case 'CENTERED_PHRASE': return 'Frase centrada, dedicatoria…';
+      default:          return '';
+    }
+  }
+
+  /** Resumen compacto de un bloque no-texto para la card en write mode */
+  function writeMediaCardLabel(block: DocumentBlock): string {
+    return blockContentPreview(block, 60) || blockTypeLabel(block.blockType);
+  }
+
+  // ── Write Mode — input y guardado ─────────────────────────────────────────
+
+  function onWriteInput(e: Event, blockId: string) {
+    const el   = e.target as HTMLTextAreaElement;
+    const text = el.value;
+    // Actualizar estado local inmediatamente
+    blocks = blocks.map(b => b.id === blockId ? { ...b, contentText: text } : b);
+    // Programar guardado con debounce de 800 ms
+    if (writeTimers.has(blockId)) clearTimeout(writeTimers.get(blockId)!);
+    writeTimers.set(blockId, setTimeout(async () => {
+      writeTimers.delete(blockId);
+      try { await updateBlock(blockId, { contentText: text }); } catch { /* silencioso */ }
+    }, 800));
+  }
+
+  async function flushWriteBlockSave(blockId: string) {
+    if (!writeTimers.has(blockId)) return;
+    clearTimeout(writeTimers.get(blockId)!);
+    writeTimers.delete(blockId);
+    const block = blocks.find(b => b.id === blockId);
+    if (block) {
+      try { await updateBlock(blockId, { contentText: block.contentText }); } catch { /* silencioso */ }
+    }
+  }
+
+  // ── Write Mode — teclado ──────────────────────────────────────────────────
+
+  async function handleWriteKeydown(e: KeyboardEvent, blockId: string, blockIndex: number) {
+    const el = e.target as HTMLTextAreaElement;
+
+    // Enter (sin Shift) → nuevo párrafo debajo
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      await flushWriteBlockSave(blockId);
+      if (!selectedSectionId || addingBlock) return;
+      addingBlock = true;
+      try {
+        const created = await createBlockInSection(selectedSectionId, blocks, blockId, {
+          blockType: 'PARAGRAPH', contentText: '',
+        });
+        blocks = await listBlocks(selectedSectionId);
+        selectedBlockId     = created.id;
+        pendingFocusBlockId = created.id;
+      } catch (err) {
+        globalError = err instanceof Error ? err.message : String(err);
+      } finally {
+        addingBlock = false;
+      }
+      return;
+    }
+
+    // Backspace al inicio del bloque
+    if (e.key === 'Backspace' && el.selectionStart === 0 && el.selectionEnd === 0) {
+      e.preventDefault();
+      await flushWriteBlockSave(blockId);
+
+      if (el.value === '') {
+        // Bloque vacío → eliminar y focalizar el anterior
+        if (blockIndex > 0) pendingFocusBlockId = blocks[blockIndex - 1].id;
+        try {
+          await deleteBlock(blockId);
+          blocks = blocks.filter(b => b.id !== blockId);
+          if (selectedBlockId === blockId) selectedBlockId = null;
+        } catch (err) {
+          globalError = err instanceof Error ? err.message : String(err);
+        }
+      } else if (blockIndex > 0) {
+        // Bloque con texto → fusionar con el anterior si es editable
+        const prev = blocks[blockIndex - 1];
+        if (blockHasEditableText(blockEditorSurface(prev.blockType))) {
+          const mergedText  = prev.contentText + el.value;
+          const cursorAfter = prev.contentText.length;
+          try {
+            await updateBlock(prev.id, { contentText: mergedText });
+            await deleteBlock(blockId);
+            blocks = await listBlocks(selectedSectionId!);
+            pendingFocusBlockId = prev.id;
+            // Guardar posición de cursor para restaurarla después del foco
+            setTimeout(() => {
+              const prevEl = document.getElementById(`wbt-${prev.id}`) as HTMLTextAreaElement | null;
+              if (prevEl) { prevEl.selectionStart = cursorAfter; prevEl.selectionEnd = cursorAfter; }
+            }, 20);
+          } catch (err) {
+            globalError = err instanceof Error ? err.message : String(err);
+          }
+        }
+      }
+      return;
+    }
+
+    // Tab / Shift+Tab → navegar entre bloques
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const targetIndex = e.shiftKey ? blockIndex - 1 : blockIndex + 1;
+      if (targetIndex >= 0 && targetIndex < blocks.length) {
+        const targetBlock = blocks[targetIndex];
+        if (blockHasEditableText(blockEditorSurface(targetBlock.blockType))) {
+          const targetEl = document.getElementById(`wbt-${targetBlock.id}`) as HTMLTextAreaElement | null;
+          if (targetEl) { targetEl.focus(); selectedBlockId = targetBlock.id; }
+        }
+      }
+      return;
+    }
+
+    // Ctrl+Shift+0-6 → cambio rápido de tipo de bloque
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+      const typeShortcuts: Record<string, BlockType> = {
+        '0': 'PARAGRAPH',
+        '1': 'HEADING_1',
+        '2': 'HEADING_2',
+        '3': 'HEADING_3',
+        '4': 'HEADING_4',
+        '5': 'QUOTE',
+        '6': 'CENTERED_PHRASE',
+      };
+      if (typeShortcuts[e.key]) {
+        e.preventDefault();
+        await changeWriteBlockType(blockId, typeShortcuts[e.key]);
+        return;
+      }
+    }
+
+    // Escape → cerrar gutter picker si está abierto
+    if (e.key === 'Escape' && gutterPickerBlockId) {
+      e.preventDefault();
+      gutterPickerBlockId = null;
+      return;
+    }
+  }
+
+  // Abrir inspector en write mode para bloques no-texto
+  function openMediaBlockInWriteMode(blockId: string) {
+    void selectBlock(blockId);
+    showWriteInspector = true;
+    inspectorTab = 'block';
+  }
+
+  // ── Write Mode — cambio de tipo de bloque ─────────────────────────────
+
+  /** Tipos disponibles en el picker rápido del gutter */
+  const WRITE_QUICK_TYPES: { type: BlockType; label: string; hint: string }[] = [
+    { type: 'PARAGRAPH',       label: '¶',   hint: 'Párrafo' },
+    { type: 'HEADING_1',       label: 'H1',  hint: 'Título principal' },
+    { type: 'HEADING_2',       label: 'H2',  hint: 'Subtítulo' },
+    { type: 'HEADING_3',       label: 'H3',  hint: 'Subtítulo 3' },
+    { type: 'HEADING_4',       label: 'H4',  hint: 'Subtítulo 4' },
+    { type: 'QUOTE',           label: '"',   hint: 'Cita' },
+    { type: 'CENTERED_PHRASE', label: '⊙',  hint: 'Línea centrada' },
+    { type: 'SEPARATOR',       label: '—',   hint: 'Separador' },
+    { type: 'PAGE_BREAK',      label: '↵',   hint: 'Salto de página' },
+  ];
+
+  /** ID del bloque cuyo gutter picker está abierto */
+  let gutterPickerBlockId = $state<string | null>(null);
+
+  async function changeWriteBlockType(blockId: string, newType: BlockType) {
+    gutterPickerBlockId = null;
+    const prev = blocks.find(b => b.id === blockId);
+    if (!prev || prev.blockType === newType) return;
+    try {
+      await updateBlock(blockId, { blockType: newType });
+      blocks = blocks.map(b => b.id === blockId ? { ...b, blockType: newType } : b);
+      // Refocalizar el mismo bloque
+      pendingFocusBlockId = blockId;
+    } catch (err) {
+      globalError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  function toggleGutterPicker(blockId: string) {
+    gutterPickerBlockId = gutterPickerBlockId === blockId ? null : blockId;
+  }
+
+  function closeGutterPicker() { gutterPickerBlockId = null; }
 
   // ── Drag & drop ───────────────────────────────────────────────────────────
   let dragSectionId          = $state<string | null>(null);
@@ -1435,7 +1768,7 @@
   {/if}
 
   <!-- ═════════════════ PANEL SECCIONES ════════════════════════════════════ -->
-  <aside class="panel panel--sections" class:panel--hidden={focusMode} aria-hidden={focusMode}>
+  <aside class="panel panel--sections" class:panel--hidden={focusMode || editorMode === 'write'} aria-hidden={focusMode || editorMode === 'write'}>
     <div class="panel-header">
       <span class="panel-title">Estructura</span>
       <div class="panel-header-actions">
@@ -1517,7 +1850,14 @@
                     <span class="section-type-muted">{sectionTypeLabel(section.sectionType)}</span>
                   {/if}
                 </span>
-                {#if sectionBlockCounts[section.id] !== undefined}
+                {#if sectionWordCounts[section.id] !== undefined}
+                  <span class="section-word-count" title="{sectionWordCounts[section.id]} palabras">
+                    {sectionWordCounts[section.id] >= 1000
+                      ? `${(sectionWordCounts[section.id] / 1000).toFixed(1)}k`
+                      : sectionWordCounts[section.id]}
+                    <span class="section-word-count__unit">¶</span>
+                  </span>
+                {:else if sectionBlockCounts[section.id] !== undefined}
                   <span class="section-blk-count" title="{sectionBlockCounts[section.id]} bloque(s)">
                     {sectionBlockCounts[section.id]}
                   </span>
@@ -1591,6 +1931,31 @@
         {/if}
       </div>
     {:else}
+      <!-- ── Tabs de sección (solo modo escritura) ─────────────────────── -->
+      {#if editorMode === 'write' && sections.length > 0}
+        <div class="section-tabs" role="tablist" aria-label="Secciones del libro">
+          {#each sections as sec (sec.id)}
+            <button
+              type="button"
+              role="tab"
+              class="section-tab"
+              class:section-tab--active={selectedSectionId === sec.id}
+              onclick={() => void selectSection(sec.id)}
+              title={sectionTypeLabel(sec.sectionType)}
+            >
+              {sec.title || sectionTypeLabel(sec.sectionType)}
+            </button>
+          {/each}
+          <button
+            type="button"
+            class="section-tab section-tab--add"
+            onclick={openNewSectionModal}
+            title="Nueva sección"
+            aria-label="Nueva sección"
+          >+</button>
+        </div>
+      {/if}
+
       <!-- Header del panel de bloques -->
       <div class="blocks-header">
         <div class="blocks-header-left">
@@ -1600,6 +1965,32 @@
           <span class="blocks-section-badge">{sectionTypeLabel(selectedSection.sectionType)}</span>
         </div>
         <div class="blocks-header-actions">
+
+          <!-- Toggle de modo: Escritura / Maquetación -->
+          <div class="mode-toggle" role="group" aria-label="Modo de edición">
+            <button
+              type="button"
+              class="mode-toggle__btn"
+              class:mode-toggle__btn--active={editorMode === 'write'}
+              onclick={() => setEditorMode('write')}
+              title="Modo escritura — editor continuo sin paneles"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+              Escribir
+            </button>
+            <button
+              type="button"
+              class="mode-toggle__btn"
+              class:mode-toggle__btn--active={editorMode === 'layout'}
+              onclick={() => setEditorMode('layout')}
+              title="Modo maquetación — paneles completos"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="18"/><rect x="14" y="3" width="7" height="10"/><rect x="14" y="17" width="7" height="4"/></svg>
+              Maquetar
+            </button>
+          </div>
+
+          {#if editorMode === 'layout'}
           <button
             type="button"
             class="btn btn--sm btn--ghost focus-toggle-btn"
@@ -1615,6 +2006,7 @@
               Enfocar
             {/if}
           </button>
+          {/if}
           <button
             type="button"
             class="btn btn--sm btn--ghost"
@@ -1698,7 +2090,107 @@
               {#if addingBlock}<span class="spinner-sm spinner-sm--light"></span> Insertando…{:else}+ Añadir primer bloque{/if}
             </button>
           </div>
+        {:else if editorMode === 'write'}
+          <!-- ══════════════ MODO ESCRITURA ══════════════════════════════ -->
+          <div class="write-stage" onclick={(e) => {
+            if (e.target === e.currentTarget) { void clearBlockSelection(); showWriteInspector = false; }
+          }}>
+            <article class="write-doc" onclick={(e) => {
+              if (e.target === e.currentTarget) { void clearBlockSelection(); showWriteInspector = false; }
+            }}>
+              {#each blocks as block, i (block.id)}
+                <div
+                  class="write-block write-block--{block.blockType}"
+                  class:write-block--active={selectedBlockId === block.id}
+                >
+                  <!-- Marcador de tipo en el margen izquierdo (click → picker) -->
+                  <div class="write-gutter-wrap">
+                    <button
+                      type="button"
+                      class="write-gutter"
+                      class:write-gutter--open={gutterPickerBlockId === block.id}
+                      title="Cambiar tipo de bloque"
+                      onclick={(e) => { e.stopPropagation(); selectedBlockId = block.id; toggleGutterPicker(block.id); }}
+                    >{writeGutterLabel(block.blockType)}</button>
+
+                    {#if gutterPickerBlockId === block.id}
+                      <div class="gutter-picker" role="menu" aria-label="Tipo de bloque">
+                        {#each WRITE_QUICK_TYPES as qt (qt.type)}
+                          <button
+                            type="button"
+                            class="gutter-picker__item"
+                            class:gutter-picker__item--active={block.blockType === qt.type}
+                            role="menuitem"
+                            title={qt.hint}
+                            onclick={(e) => { e.stopPropagation(); void changeWriteBlockType(block.id, qt.type); }}
+                          >
+                            <span class="gutter-picker__label">{qt.label}</span>
+                            <span class="gutter-picker__hint">{qt.hint}</span>
+                          </button>
+                        {/each}
+                      </div>
+                    {/if}
+                  </div>
+
+                  {#if blockHasEditableText(blockEditorSurface(block.blockType))}
+                    <!-- Bloque de texto editable -->
+                    <textarea
+                      id="wbt-{block.id}"
+                      class="write-textarea"
+                      style={getWriteBlockCss(block)}
+                      rows={1}
+                      spellcheck="true"
+                      placeholder={writeBlockPlaceholder(block.blockType, i)}
+                      use:autoResizeAction={block.contentText}
+                      onkeydown={(e) => handleWriteKeydown(e, block.id, i)}
+                      oninput={(e) => onWriteInput(e, block.id)}
+                      onblur={() => flushWriteBlockSave(block.id)}
+                      onfocus={() => { selectedBlockId = block.id; showWriteInspector = false; }}
+                    >{block.contentText}</textarea>
+
+                  {:else if block.blockType === 'SEPARATOR'}
+                    <div class="write-separator">· · ·</div>
+
+                  {:else if block.blockType === 'PAGE_BREAK'}
+                    <div class="write-page-break">
+                      <span class="write-page-break__line"></span>
+                      <span class="write-page-break__label">salto de página</span>
+                      <span class="write-page-break__line"></span>
+                    </div>
+
+                  {:else}
+                    <!-- Bloques no-texto: IMAGE, CHAPTER_OPENING, TITLE_PAGE -->
+                    <button
+                      type="button"
+                      class="write-media-card"
+                      class:write-media-card--active={selectedBlockId === block.id}
+                      onclick={(e) => { e.stopPropagation(); openMediaBlockInWriteMode(block.id); }}
+                    >
+                      <span class="write-media-card__type">{blockTypeLabel(block.blockType)}</span>
+                      <span class="write-media-card__label">{writeMediaCardLabel(block)}</span>
+                      <span class="write-media-card__edit">Editar →</span>
+                    </button>
+                  {/if}
+                </div>
+              {/each}
+
+              <!-- Área de nuevo bloque al final -->
+              {#if !addingBlock}
+                <div
+                  class="write-append"
+                  role="button"
+                  tabindex="0"
+                  onclick={() => { void addBlockQuick('end'); }}
+                  onkeydown={(e) => { if (e.key === 'Enter') void addBlockQuick('end'); }}
+                >
+                  Haz clic para continuar escribiendo <kbd>/</kbd> para insertar un bloque
+                </div>
+              {/if}
+            </article>
+          </div>
+
         {:else}
+          <!-- ══════════════ MODO MAQUETACIÓN ════════════════════════════ -->
           <div class="manuscript-stage" onclick={(e) => { if (e.target === e.currentTarget) void clearBlockSelection(); }}>
             <article class="manuscript-doc" aria-label="Documento de la sección" onclick={(e) => { if (e.target === e.currentTarget) void clearBlockSelection(); }}>
               {#each blocks as block, i (block.id)}
@@ -1909,16 +2401,59 @@
         {/if}
       </div>
     {/if}
+
+    <!-- ── Barra de estadísticas ──────────────────────────────────────── -->
+    {#if selectedSectionId && !loadingBlocks}
+      <div class="stats-bar" onclick={() => closeGutterPicker()}>
+        <span class="stats-bar__section">
+          <span class="stats-bar__label">Sección:</span>
+          <strong>{currentSectionWordCount.toLocaleString('es')}</strong> palabras
+          · ~{estimatedPages(currentSectionWordCount)} pág
+        </span>
+        {#if Object.keys(sectionWordCounts).length > 1}
+          <span class="stats-bar__sep">│</span>
+          <span class="stats-bar__book">
+            <span class="stats-bar__label">Libro:</span>
+            <strong>{bookWordCount.toLocaleString('es')}</strong> palabras
+            · ~{estimatedPages(bookWordCount)} pág
+          </span>
+        {/if}
+
+        <!-- Atajos de teclado (write mode) -->
+        {#if editorMode === 'write'}
+          <span class="stats-bar__sep stats-bar__sep--push">│</span>
+          <span class="stats-bar__shortcuts">
+            <kbd>Enter</kbd> nuevo bloque
+            <kbd>⌫ inicio</kbd> fusionar
+            <kbd>Tab</kbd> siguiente
+            <kbd>Ctrl+Shift+1-4</kbd> H1–H4
+            <kbd>/</kbd> tipos
+          </span>
+        {/if}
+      </div>
+    {/if}
   </main>
 
   <!-- ═════════════════ INSPECTOR ══════════════════════════════════════════ -->
-  <aside class="panel panel--inspector" class:panel--hidden={focusMode} aria-hidden={focusMode}>
+  <aside class="panel panel--inspector" class:panel--hidden={focusMode || (editorMode === 'write' && !showWriteInspector)} aria-hidden={focusMode || (editorMode === 'write' && !showWriteInspector)}>
     <div class="panel-header">
       <span class="panel-title">
         {#if inspectorMode === 'block'}Inspector de bloque
         {:else if inspectorMode === 'section'}Inspector de sección
         {:else}Inspector{/if}
       </span>
+      <!-- Botón cerrar inspector cuando está abierto desde write mode -->
+      {#if editorMode === 'write' && showWriteInspector}
+        <button
+          type="button"
+          class="icon-btn"
+          title="Cerrar inspector y volver a escritura"
+          onclick={() => { showWriteInspector = false; }}
+          style="margin-left:auto;flex-shrink:0"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      {/if}
       {#if inspectorSaving}
         <span class="save-status save-status--saving">
           <span class="spinner-xs"></span>Guardando…
@@ -2681,6 +3216,158 @@
     border-color: var(--editor-accent-border, rgba(122,184,232,0.35));
   }
 
+  /* ── Toggle de modo Escribir / Maquetar ─────────────────────────────── */
+  .mode-toggle {
+    display: flex;
+    align-items: center;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.1);
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .mode-toggle__btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    font-family: inherit;
+    color: rgba(255,255,255,0.45);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+    white-space: nowrap;
+  }
+  .mode-toggle__btn + .mode-toggle__btn {
+    border-left: 1px solid rgba(255,255,255,0.1);
+  }
+  .mode-toggle__btn:hover:not(.mode-toggle__btn--active) {
+    background: rgba(255,255,255,0.07);
+    color: rgba(255,255,255,0.7);
+  }
+  .mode-toggle__btn--active {
+    background: rgba(122,184,232,0.15);
+    color: #7ab8e8;
+  }
+
+  /* ── Tabs de sección (modo escritura) ───────────────────────────────── */
+  .section-tabs {
+    display: flex;
+    align-items: center;
+    overflow-x: auto;
+    scrollbar-width: none;
+    border-bottom: 1px solid var(--editor-border);
+    background: var(--editor-surface-void);
+    flex-shrink: 0;
+    padding: 0 4px;
+    gap: 2px;
+  }
+  .section-tabs::-webkit-scrollbar { display: none; }
+
+  .section-tab {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 14px;
+    font-size: 12px;
+    font-weight: 500;
+    font-family: inherit;
+    color: rgba(255,255,255,0.45);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.12s, border-color 0.12s;
+    flex-shrink: 0;
+    margin-bottom: -1px;
+  }
+  .section-tab:hover:not(.section-tab--active) {
+    color: rgba(255,255,255,0.75);
+  }
+  .section-tab--active {
+    color: #7ab8e8;
+    border-bottom-color: #7ab8e8;
+  }
+  .section-tab--add {
+    font-size: 16px;
+    padding: 4px 10px;
+    color: rgba(255,255,255,0.25);
+    border-bottom: none;
+  }
+  .section-tab--add:hover { color: rgba(255,255,255,0.7); }
+
+  /* ── Barra de estadísticas ──────────────────────────────────────────── */
+  .stats-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 20px;
+    height: 28px;
+    font-size: 11px;
+    color: rgba(255,255,255,0.3);
+    border-top: 1px solid var(--editor-border);
+    background: var(--editor-surface-void);
+    flex-shrink: 0;
+    user-select: none;
+  }
+  .stats-bar__label {
+    color: rgba(255,255,255,0.18);
+    margin-right: 3px;
+  }
+  .stats-bar strong {
+    color: rgba(255,255,255,0.55);
+    font-weight: 600;
+  }
+  .stats-bar__sep {
+    color: rgba(255,255,255,0.12);
+  }
+  .stats-bar__sep--push {
+    margin-left: auto;
+  }
+  .stats-bar__shortcuts {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 10px;
+    color: rgba(255,255,255,0.2);
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .stats-bar__shortcuts kbd {
+    display: inline-block;
+    padding: 1px 5px;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 3px;
+    font-size: 9px;
+    font-family: monospace;
+    background: rgba(255,255,255,0.04);
+    color: rgba(255,255,255,0.3);
+  }
+
+  /* ── Word count en lista de secciones ───────────────────────────────── */
+  .section-word-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255,255,255,0.35);
+    background: rgba(255,255,255,0.06);
+    border-radius: 4px;
+    padding: 1px 5px;
+    flex-shrink: 0;
+  }
+  .section-word-count__unit {
+    font-size: 9px;
+    opacity: 0.6;
+  }
+  .section-row--active .section-word-count {
+    color: rgba(122,184,232,0.7);
+    background: rgba(122,184,232,0.1);
+  }
+
   /* ═══════════════════════════════════════════════════════════════════════════
      PANELES
   ═══════════════════════════════════════════════════════════════════════════ */
@@ -3220,6 +3907,281 @@
     padding: 8px 0;
   }
 
+  /* ═══════════════════════════════════════════════════════════════════════════
+     MODO ESCRITURA — write stage
+  ═══════════════════════════════════════════════════════════════════════════ */
+
+  .write-stage {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: #1c1c2a;
+    padding: 40px 20px 100px;
+    display: flex;
+    justify-content: center;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.1) transparent;
+  }
+
+  .write-doc {
+    width: 100%;
+    max-width: 660px;
+    background: #fafaf8;
+    color: #1a1a22;
+    border-radius: 3px;
+    box-shadow:
+      0 2px 8px rgba(0,0,0,0.15),
+      0 16px 48px rgba(0,0,0,0.28);
+    padding: 72px 80px 80px;
+    min-height: 60vh;
+    position: relative;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 12pt;
+    line-height: 1.6;
+  }
+
+  /* ── Bloque base ──────────────────────────────────────────────────────── */
+  .write-block {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    margin-bottom: 0;
+  }
+
+  /* Margen izquierdo con tipo — wrapper para posicionamiento del picker */
+  .write-gutter-wrap {
+    position: absolute;
+    left: -48px;
+    top: 0;
+    width: 40px;
+  }
+
+  .write-gutter {
+    display: block;
+    width: 100%;
+    text-align: right;
+    font-size: 9px;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: rgba(0,0,0,0.25);
+    opacity: 0;
+    transition: opacity 0.12s, color 0.12s;
+    cursor: pointer;
+    user-select: none;
+    padding: 3px 0;
+    background: none;
+    border: none;
+    border-radius: 3px;
+  }
+  .write-block:hover .write-gutter,
+  .write-block--active .write-gutter { opacity: 1; }
+  .write-gutter:hover,
+  .write-gutter--open {
+    color: rgba(37,99,235,0.7);
+    opacity: 1;
+  }
+
+  /* ── Gutter type picker ────────────────────────────────────────────── */
+  .gutter-picker {
+    position: absolute;
+    top: 0;
+    left: calc(100% + 4px);
+    z-index: 40;
+    background: #fff;
+    border: 1px solid rgba(0,0,0,0.12);
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.14), 0 1px 4px rgba(0,0,0,0.08);
+    padding: 5px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 160px;
+  }
+  .gutter-picker__item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px;
+    border: none;
+    background: transparent;
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    transition: background 0.08s;
+  }
+  .gutter-picker__item:hover {
+    background: rgba(37,99,235,0.08);
+  }
+  .gutter-picker__item--active {
+    background: rgba(37,99,235,0.1);
+  }
+  .gutter-picker__label {
+    font-size: 10px;
+    font-weight: 700;
+    width: 16px;
+    text-align: center;
+    color: rgba(37,99,235,0.8);
+    flex-shrink: 0;
+  }
+  .gutter-picker__hint {
+    font-size: 12px;
+    color: rgba(0,0,0,0.6);
+  }
+  .gutter-picker__item--active .gutter-picker__hint {
+    color: rgba(37,99,235,0.9);
+    font-weight: 500;
+  }
+
+  /* ── Textarea editable ────────────────────────────────────────────────── */
+  .write-textarea {
+    width: 100%;
+    background: transparent;
+    border: none;
+    outline: none;
+    resize: none;
+    overflow: hidden;
+    color: #1a1a22;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 12pt;
+    line-height: 1.6;
+    padding: 0;
+    margin: 0;
+    white-space: pre-wrap;
+    min-height: 1.6em;
+    /* Highlight sutil cuando está activo */
+    caret-color: #2563eb;
+  }
+  .write-textarea::placeholder {
+    color: rgba(0,0,0,0.22);
+    font-style: italic;
+  }
+  .write-textarea:focus { outline: none; }
+
+  /* Espaciado entre bloques según tipo */
+  .write-block--HEADING_1  { margin-top: 2em;    margin-bottom: 0.2em; }
+  .write-block--HEADING_2  { margin-top: 1.6em;  margin-bottom: 0.15em; }
+  .write-block--HEADING_3  { margin-top: 1.2em;  margin-bottom: 0.1em; }
+  .write-block--HEADING_4  { margin-top: 0.8em;  margin-bottom: 0.1em; }
+  .write-block--PARAGRAPH  { margin-top: 0;      }
+  .write-block--QUOTE      { margin-top: 1em;    margin-bottom: 1em; }
+  .write-block--CENTERED_PHRASE { margin-top: 1.4em; margin-bottom: 1.4em; }
+  .write-block--SEPARATOR  { margin-top: 1.5em;  margin-bottom: 1.5em; }
+  .write-block--PAGE_BREAK { margin-top: 1.2em;  margin-bottom: 1.2em; }
+  .write-block--IMAGE,
+  .write-block--CHAPTER_OPENING,
+  .write-block--TITLE_PAGE { margin-top: 1.2em;  margin-bottom: 1.2em; }
+
+  /* Cita: borde izquierdo visual */
+  .write-block--QUOTE .write-textarea {
+    border-left: 3px solid rgba(0,0,0,0.15);
+    padding-left: 14px;
+    color: rgba(0,0,0,0.72);
+  }
+
+  /* ── Decoradores: separador y salto de página ─────────────────────────── */
+  .write-separator {
+    width: 100%;
+    text-align: center;
+    font-size: 14px;
+    color: rgba(0,0,0,0.25);
+    letter-spacing: 0.4em;
+    padding: 4px 0;
+    user-select: none;
+  }
+
+  .write-page-break {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    user-select: none;
+  }
+  .write-page-break__line {
+    flex: 1;
+    height: 1px;
+    background: rgba(0,0,0,0.12);
+    border-bottom: 1px dashed rgba(0,0,0,0.15);
+  }
+  .write-page-break__label {
+    font-size: 10px;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    color: rgba(0,0,0,0.25);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    white-space: nowrap;
+  }
+
+  /* ── Card de bloques no-texto (IMAGE, CO, TP) ─────────────────────────── */
+  .write-media-card {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1.5px dashed rgba(0,0,0,0.15);
+    background: rgba(0,0,0,0.03);
+    cursor: pointer;
+    text-align: left;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    transition: border-color 0.12s, background 0.12s;
+  }
+  .write-media-card:hover,
+  .write-media-card--active {
+    border-color: rgba(37,99,235,0.4);
+    background: rgba(37,99,235,0.04);
+  }
+  .write-media-card__type {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: rgba(0,0,0,0.35);
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  .write-media-card__label {
+    flex: 1;
+    font-size: 12px;
+    color: rgba(0,0,0,0.5);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-style: italic;
+  }
+  .write-media-card__edit {
+    font-size: 11px;
+    color: rgba(37,99,235,0.7);
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  /* ── Área de añadir bloque al final ──────────────────────────────────── */
+  .write-append {
+    margin-top: 1.5em;
+    padding: 10px 0;
+    font-size: 12px;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    color: rgba(0,0,0,0.2);
+    cursor: text;
+    font-style: italic;
+    user-select: none;
+    transition: color 0.12s;
+  }
+  .write-append:hover { color: rgba(0,0,0,0.35); }
+  .write-append kbd {
+    display: inline-block;
+    padding: 1px 5px;
+    border: 1px solid rgba(0,0,0,0.15);
+    border-radius: 3px;
+    font-size: 10px;
+    font-family: monospace;
+    font-style: normal;
+    background: rgba(0,0,0,0.04);
+  }
+
   /* FASE A — canvas de escritura tipo manuscrito */
   .manuscript-stage {
     padding: 20px 0 28px;
@@ -3330,7 +4292,9 @@
   .manuscript-block.block-item.block-item--active {
     background: rgba(53, 99, 153, 0.09) !important;
     border-color: rgba(53, 99, 153, 0.3) !important;
-    box-shadow: 0 0 0 1px rgba(53, 99, 153, 0.12);
+    box-shadow:
+      0 0 0 1px rgba(53, 99, 153, 0.12),
+      inset 3px 0 0 rgba(122, 184, 232, 0.6);
   }
   .manuscript-block.block-item.block-item--dragging {
     opacity: 0.35;
@@ -3831,7 +4795,8 @@
 
   .block-item--active {
     background: rgba(122,184,232,0.08) !important;
-    border-color: rgba(122,184,232,0.25) !important;
+    border-color: rgba(122,184,232,0.28) !important;
+    box-shadow: inset 3px 0 0 rgba(122,184,232,0.55);
   }
 
   /* Chip del tipo de bloque */
