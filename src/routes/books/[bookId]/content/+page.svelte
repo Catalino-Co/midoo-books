@@ -261,12 +261,14 @@
     }
   }
 
-  /** CSS inline para la textarea de un bloque en write mode */
+  /** CSS inline para la textarea de un bloque en write mode.
+   *  Usa resolveEffectiveBookStyleInfoForBlock (igual que el preview) para
+   *  respetar overrides de alineación, énfasis y variante del bloque. */
   function getWriteBlockCss(block: DocumentBlock): string {
-    if (!bookStyles || !selectedSection) return '';
-    const role = resolveBookStyleRoleForBlock(selectedSection.sectionType, block);
-    if (!role) return '';
-    return buildBookStyleCss(bookStyles[role], { includeMargins: false, includeMaxWidth: false });
+    if (!bookLayoutSettings || !selectedSection) return '';
+    const info = resolveEffectiveBookStyleInfoForBlock(bookLayoutSettings, selectedSection, block);
+    if (!info) return '';
+    return buildBookStyleCss(info.finalStyle, { includeMargins: false, includeMaxWidth: false });
   }
 
   /** Texto placeholder según tipo de bloque */
@@ -2158,8 +2160,41 @@
                       <span class="write-page-break__line"></span>
                     </div>
 
+                  {:else if block.blockType === 'IMAGE'}
+                    <!-- Imagen: mostrar la imagen real si hay asset asignado -->
+                    {@const imgData = parseImageBlockContent(block.contentJson)}
+                    {@const imgAsset = imgData.assetId ? bookAssets.find(a => a.id === imgData.assetId) : null}
+                    <div
+                      class="write-image"
+                      class:write-image--active={selectedBlockId === block.id}
+                    >
+                      {#if imgAsset}
+                        <img
+                          src={assetDisplayUrl(bookId, imgAsset.storagePath)}
+                          alt={imgData.altText || ''}
+                          class="write-image__img"
+                          class:write-image__img--fill={imgData.fillPage}
+                        />
+                        {#if imgData.caption?.trim()}
+                          <p class="write-image__caption">{imgData.caption}</p>
+                        {/if}
+                      {:else}
+                        <div class="write-image__placeholder">
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                          <span>Sin imagen — clic para asignar</span>
+                        </div>
+                      {/if}
+                      <!-- Overlay de editar en hover -->
+                      <button
+                        type="button"
+                        class="write-image__edit-btn"
+                        onclick={(e) => { e.stopPropagation(); openMediaBlockInWriteMode(block.id); }}
+                        title="Configurar imagen"
+                      >Editar imagen →</button>
+                    </div>
+
                   {:else}
-                    <!-- Bloques no-texto: IMAGE, CHAPTER_OPENING, TITLE_PAGE -->
+                    <!-- Bloques estructurados: CHAPTER_OPENING, TITLE_PAGE -->
                     <button
                       type="button"
                       class="write-media-card"
@@ -4114,6 +4149,75 @@
   }
 
   /* ── Card de bloques no-texto (IMAGE, CO, TP) ─────────────────────────── */
+  /* ── Imagen en write mode ────────────────────────────────────────────── */
+  .write-image {
+    position: relative;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .write-image__img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    border-radius: 3px;
+  }
+  .write-image__img--fill {
+    width: 100%;
+    max-height: 320px;
+    object-fit: cover;
+  }
+  .write-image__caption {
+    font-size: 11px;
+    color: rgba(0,0,0,0.45);
+    text-align: center;
+    font-style: italic;
+    margin: 0;
+    padding: 0 8px;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+  }
+  .write-image__placeholder {
+    width: 100%;
+    min-height: 80px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: rgba(0,0,0,0.04);
+    border: 1.5px dashed rgba(0,0,0,0.15);
+    border-radius: 4px;
+    color: rgba(0,0,0,0.35);
+    font-size: 12px;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-style: italic;
+    padding: 20px;
+    cursor: pointer;
+  }
+  /* Botón editar: oculto hasta hover */
+  .write-image__edit-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: none;
+    background: rgba(0,0,0,0.55);
+    color: #fff;
+    font-size: 11px;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.12s;
+    backdrop-filter: blur(4px);
+  }
+  .write-image:hover .write-image__edit-btn,
+  .write-image--active .write-image__edit-btn { opacity: 1; }
+
   .write-media-card {
     width: 100%;
     display: flex;
