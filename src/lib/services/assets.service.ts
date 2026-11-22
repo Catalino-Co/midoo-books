@@ -21,8 +21,8 @@ export async function deleteAsset(id: string): Promise<boolean> {
   return getPlatformAdapter().deleteAsset(id);
 }
 
-export async function pickAndImportAssets(bookId: string): Promise<Asset[]> {
-  return getPlatformAdapter().pickAndImportAssets(bookId);
+export async function pickAndImportAssets(bookId: string, kind: 'image' | 'font' = 'image'): Promise<Asset[]> {
+  return getPlatformAdapter().pickAndImportAssets(bookId, kind);
 }
 
 export async function importAssetFiles(bookId: string, paths: string[]): Promise<Asset[]> {

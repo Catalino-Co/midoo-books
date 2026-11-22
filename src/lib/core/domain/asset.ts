@@ -46,6 +46,12 @@ export interface Asset {
   checksum:      string;         // SHA-256 del archivo (integridad)
   altText:       string;         // Texto alternativo (accesibilidad)
   caption:       string;         // Pie de imagen / leyenda visible (opcional, puede ir vacío)
+  /** Solo assetType 'font': familia CSS con la que se registra (editable por el usuario). */
+  fontFamily:    string | null;
+  /** Solo 'font': peso 100–900 (400 normal, 700 negrita). */
+  fontWeight:    number | null;
+  /** Solo 'font': 'normal' | 'italic'. */
+  fontStyle:     'normal' | 'italic' | null;
   createdAt:     string;
   updatedAt:     string;
 }
@@ -68,10 +74,16 @@ export interface CreateAssetInput {
   checksum:      string;
   altText?:      string;
   caption?:      string;
+  fontFamily?:   string | null;
+  fontWeight?:   number | null;
+  fontStyle?:    'normal' | 'italic' | null;
 }
 
 export interface UpdateAssetInput {
   altText?:    string;
   caption?:    string;
   assetType?:  AssetType;
+  fontFamily?: string | null;
+  fontWeight?: number | null;
+  fontStyle?:  'normal' | 'italic' | null;
 }

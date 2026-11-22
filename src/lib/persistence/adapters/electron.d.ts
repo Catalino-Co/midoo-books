@@ -94,7 +94,7 @@ declare global {
         getById(id: string):                                      Promise<Asset | null | { error: string }>;
         update(id: string, input: UpdateAssetInput):              Promise<Asset | null | { error: string }>;
         delete(id: string):                                       Promise<{ deleted: boolean } | { error: string }>;
-        pickAndImport(bookId: string):                            Promise<{ imported: Asset[] } | { error: string }>;
+        pickAndImport(bookId: string, kind?: 'image' | 'font'):   Promise<{ imported: Asset[] } | { error: string }>;
         importPaths(bookId: string, paths: string[]):            Promise<{ imported: Asset[] } | { error: string }>;
       };
 

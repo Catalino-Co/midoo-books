@@ -20,7 +20,8 @@ import { join } from 'path';
 import { openDatabase, closeDatabase } from '../database/connection';
 import { registerAllHandlers } from '../ipc/index';
 import { registerMidooMediaProtocol } from './register-media-protocol';
-import { APP_ORIGIN, APP_SCHEME_PRIVILEGES, registerAppProtocol } from './app-protocol';
+import { APP_SCHEME_PRIVILEGES, registerAppProtocol } from './app-protocol';
+import { DEV_URL, loadsUiFromBuild, uiUrl } from './ui-origin';
 
 // registerSchemesAsPrivileged solo puede llamarse UNA vez y antes de app.ready:
 // todos los esquemas propios deben declararse aquí.
@@ -37,15 +38,11 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-// Modo de carga de la UI:
+// Modo de carga de la UI (ver ui-origin.ts):
 //   - Desarrollo (sin empaquetar): servidor de Vite en DEV_URL.
 //   - Producción (empaquetada) o MIDOO_LOAD_BUILD=1: build estático vía app://midoo/.
 //     MIDOO_LOAD_BUILD=1 permite probar el build sin empaquetar (`npm run start:build`).
-const loadFromBuild = app.isPackaged || process.env.MIDOO_LOAD_BUILD === '1';
-const isDev = !loadFromBuild;
-
-// URL del servidor de desarrollo de Vite
-const DEV_URL = 'http://localhost:5178';
+const isDev = !loadsUiFromBuild();
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -81,7 +78,7 @@ function createWindow(): void {
   } else {
     // En producción: build estático de SvelteKit servido por el protocolo app://
     // (ver app-protocol.ts — loadFile() deja la ventana en blanco).
-    mainWindow.loadURL(`${APP_ORIGIN}/`);
+    mainWindow.loadURL(uiUrl('/'));
   }
 
   // Mostrar la ventana cuando el contenido esté listo.

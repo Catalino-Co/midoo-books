@@ -33,7 +33,8 @@
     loading = true;
     error   = null;
     try {
-      assets = await listAssets(bookId);
+      // Las fuentes también son assets, pero se gestionan en Estilos.
+      assets = (await listAssets(bookId)).filter(a => a.assetType !== 'font');
       if (selected) {
         selected = assets.find(a => a.id === selected.id) ?? null;
         syncEditorFromAsset(selected);

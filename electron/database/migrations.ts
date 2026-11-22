@@ -769,6 +769,22 @@ const migrations: Migration[] = [
     },
   },
 
+  // ── v12: metadatos de fuentes propias en assets ────────────────────────────
+  {
+    version: 12,
+    name: 'assets_font_metadata',
+    up: (db) => {
+      db.run(`ALTER TABLE assets ADD COLUMN font_family TEXT`);
+      db.run(`ALTER TABLE assets ADD COLUMN font_weight INTEGER`);
+      db.run(`ALTER TABLE assets ADD COLUMN font_style  TEXT`);
+      db.run(`
+        INSERT OR REPLACE INTO app_settings (key, value) VALUES
+          ('schemaVersion', '12')
+      `);
+      console.log('[DB] v12: assets — font_family, font_weight, font_style.');
+    },
+  },
+
 ];
 
 /**

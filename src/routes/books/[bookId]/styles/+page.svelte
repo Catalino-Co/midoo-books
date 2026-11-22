@@ -1,7 +1,16 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
-  import { getLayoutSettings } from '$lib/services/layout.service';
+  import { getLayoutSettings, updateLayoutSettings } from '$lib/services/layout.service';
+  import { deleteAsset, listAssets, pickAndImportAssets, updateAsset } from '$lib/services/assets.service';
+  import {
+    cssFontFamilyValue,
+    ensureBookFontsLoaded,
+    groupFontFamilies,
+    type BookFontFamily,
+  } from '$lib/services/book-fonts.service';
+  import { DEFAULT_BOOK_FONT_STACK } from '$lib/core/editorial/block-render-css';
+  import type { Asset } from '$lib/core/domain/asset';
   import {
     BOOK_STYLE_ROLE_CATALOG,
     cloneBookStyles,
@@ -70,6 +79,104 @@
     { label: 'Futura / Century Gothic', value: '"Century Gothic", Futura, sans-serif', category: 'Sans-serif' },
   ];
 
+  // ── Fuentes propias del libro ─────────────────────────────────────────────
+  let fontAssets   = $state<Asset[]>([]);
+  let bookFamilies = $derived<BookFontFamily[]>(groupFontFamilies(fontAssets));
+  let fontsBusy    = $state(false);
+  let fontsMsg     = $state<string | null>(null);
+  /** Fuente base del libro (LayoutSettings.bodyFontFamily). */
+  let baseFont        = $state<string>(DEFAULT_BOOK_FONT_STACK);
+  let savedBaseFont   = $state<string>(DEFAULT_BOOK_FONT_STACK);
+  /** Familia en edición de nombre (clave = nombre actual). */
+  let renaming     = $state<{ from: string; to: string } | null>(null);
+
+  /** Presets del sistema + familias propias (primero), para chips y selector de base. */
+  let allFontOptions = $derived<FontPreset[]>([
+    ...bookFamilies.map(f => ({ label: f.family, value: cssFontFamilyValue(f.family), category: 'Fuentes del libro' })),
+    ...FONT_PRESETS,
+  ]);
+  let fontCategories = $derived(
+    bookFamilies.length > 0
+      ? ['Fuentes del libro', 'Serif', 'Monoespaciada', 'Sans-serif']
+      : ['Serif', 'Monoespaciada', 'Sans-serif'],
+  );
+
+  /** Primera familia de un valor CSS, normalizada («'Courier Prime', monospace» → «courier prime»). */
+  function primaryFamily(v: string | null | undefined): string {
+    return (v ?? '').split(',')[0].replace(/['"]/g, '').trim().toLowerCase();
+  }
+
+  function variantLabel(v: { weight: number; style: 'normal' | 'italic' }): string {
+    const names: Record<number, string> = {
+      100: 'Thin', 200: 'ExtraLight', 300: 'Light', 400: 'Regular', 500: 'Medium',
+      600: 'SemiBold', 700: 'Bold', 800: 'ExtraBold', 900: 'Black',
+    };
+    const n = names[v.weight] ?? String(v.weight);
+    return v.style === 'italic' ? (v.weight === 400 ? 'Italic' : `${n} Italic`) : n;
+  }
+
+  async function loadFonts() {
+    const all = await listAssets(bookId);
+    fontAssets = all.filter(a => a.assetType === 'font');
+    await ensureBookFontsLoaded(bookId, all);
+  }
+
+  async function importFonts() {
+    fontsBusy = true;
+    fontsMsg = null;
+    try {
+      const imported = await pickAndImportAssets(bookId, 'font');
+      await loadFonts();
+      if (imported.length) {
+        const fams = [...new Set(imported.map(a => a.fontFamily).filter(Boolean))];
+        fontsMsg = `Importadas ${imported.length} variante(s): ${fams.join(', ')}.`;
+      }
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      fontsBusy = false;
+    }
+  }
+
+  async function removeFamily(fam: BookFontFamily) {
+    if (!confirm(`¿Quitar la fuente «${fam.family}» del libro? Los estilos que la usen volverán a la fuente de reserva.`)) return;
+    fontsBusy = true;
+    try {
+      for (const v of fam.variants) await deleteAsset(v.assetId);
+      await loadFonts();
+    } finally {
+      fontsBusy = false;
+    }
+  }
+
+  async function commitRename() {
+    if (!renaming) return;
+    const { from, to } = renaming;
+    const next = to.trim();
+    renaming = null;
+    if (!next || next === from) return;
+    const fam = bookFamilies.find(f => f.family === from);
+    if (!fam) return;
+    fontsBusy = true;
+    try {
+      for (const v of fam.variants) await updateAsset(v.assetId, { fontFamily: next });
+      // Actualizar referencias en estilos y fuente base
+      const oldCss = cssFontFamilyValue(from);
+      const newCss = cssFontFamilyValue(next);
+      if (styles) {
+        const updated = { ...styles };
+        for (const k of Object.keys(updated) as BookStyleRole[]) {
+          if (updated[k].fontFamily === oldCss) updated[k] = { ...updated[k], fontFamily: newCss };
+        }
+        styles = updated;
+      }
+      if (baseFont === oldCss) baseFont = newCss;
+      await loadFonts();
+    } finally {
+      fontsBusy = false;
+    }
+  }
+
   let currentStyle = $derived(styles?.[selectedRole] ?? null);
   let currentMeta = $derived(BOOK_STYLE_ROLE_CATALOG.find(entry => entry.role === selectedRole) ?? BOOK_STYLE_ROLE_CATALOG[0]);
   let selectedPreviewCss = $derived(currentStyle ? buildBookStyleCss(currentStyle) : '');
@@ -85,6 +192,9 @@
       const layout = await getLayoutSettings(bookId);
       defaultStyles = buildDefaultBookStyles(layout);
       styles = resolveBookStyles(layout);
+      baseFont = layout.bodyFontFamily?.trim() || DEFAULT_BOOK_FONT_STACK;
+      savedBaseFont = baseFont;
+      await loadFonts();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -118,6 +228,10 @@
     saveOk = false;
     try {
       await updateBookStyles(bookId, styles);
+      if (baseFont !== savedBaseFont) {
+        await updateLayoutSettings(bookId, { bodyFontFamily: baseFont });
+        savedBaseFont = baseFont;
+      }
       saveOk = true;
       setTimeout(() => {
         saveOk = false;
@@ -157,6 +271,62 @@
   {#if loading}
     <div class="state-box">Cargando estilos editoriales…</div>
   {:else if styles && currentStyle}
+    <section class="panel fonts-panel" aria-labelledby="fonts-title">
+      <div class="fonts-panel__head">
+        <div>
+          <h2 class="panel-title" id="fonts-title">Fuentes del libro</h2>
+          <p class="field-hint">
+            Importa los archivos de tus fuentes (.ttf, .otf, .woff, .woff2). Se guardan con el libro y se usan
+            igual en la vista previa, el PDF y el EPUB. Usa fuentes cuya licencia permita incrustarlas
+            (por ejemplo, las de Google Fonts con licencia OFL).
+          </p>
+        </div>
+        <button type="button" class="save-btn" onclick={() => void importFonts()} disabled={fontsBusy}>
+          {fontsBusy ? 'Importando…' : '+ Importar fuentes'}
+        </button>
+      </div>
+
+      {#if fontsMsg}<p class="save-ok">{fontsMsg}</p>{/if}
+
+      {#if bookFamilies.length > 0}
+        <ul class="font-family-list">
+          {#each bookFamilies as fam (fam.family)}
+            <li class="font-family-item">
+              {#if renaming?.from === fam.family}
+                <input
+                  class="input font-rename"
+                  bind:value={renaming.to}
+                  onkeydown={(e) => { if (e.key === 'Enter') void commitRename(); if (e.key === 'Escape') renaming = null; }}
+                  onblur={() => void commitRename()}
+                  aria-label="Nuevo nombre de la familia"
+                />
+              {:else}
+                <span class="font-family-item__name" style="font-family:{cssFontFamilyValue(fam.family)}">{fam.family}</span>
+              {/if}
+              <span class="font-family-item__variants">{fam.variants.map(variantLabel).join(' · ')}</span>
+              <span class="font-family-item__actions">
+                <button type="button" class="font-clear-btn" onclick={() => { renaming = { from: fam.family, to: fam.family }; }}>Renombrar</button>
+                <button type="button" class="font-clear-btn" onclick={() => void removeFamily(fam)} disabled={fontsBusy}>Quitar</button>
+              </span>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+
+      <div class="field base-font-field">
+        <label for="base-font">Fuente base del libro</label>
+        <select id="base-font" class="input" bind:value={baseFont}>
+          {#each allFontOptions as opt (opt.value)}
+            <option value={opt.value}>{opt.label}{opt.category === 'Fuentes del libro' ? ' (del libro)' : ''}</option>
+          {/each}
+          {#if !allFontOptions.some(o => o.value === baseFont)}
+            <option value={baseFont}>{baseFont}</option>
+          {/if}
+        </select>
+        <p class="field-hint">La usan todos los estilos que no tengan una familia propia. Se aplica al pulsar «Guardar estilos».</p>
+      </div>
+    </section>
+
     <div class="styles-grid">
       <aside class="panel panel--list">
         <h2 class="panel-title">Estilos base</h2>
@@ -241,7 +411,8 @@
               onchange={(e) => patchSelectedStyle({ fontWeight: Number((e.currentTarget as HTMLSelectElement).value) as typeof currentStyle.fontWeight })}
             >
               {#each fontWeightOptions as option}
-                <option value={option.value}>{option.label}</option>
+                <!-- value como texto: el <select> compara con String(fontWeight) -->
+                <option value={String(option.value)}>{option.label}</option>
               {/each}
             </select>
           </div>
@@ -344,22 +515,22 @@
         <div class="field">
           <label>Familia tipográfica</label>
           <p class="field-hint">
-            <strong>null</strong> = hereda la fuente del libro. Elige un preset o escribe una familia personalizada.
+            Vacío = usa la fuente base del libro. Elige una fuente o escribe el nombre de otra instalada.
           </p>
           <!-- Chips de presets agrupados -->
           <div class="font-preset-groups">
-            {#each ['Serif', 'Monoespaciada', 'Sans-serif'] as category}
+            {#each fontCategories as category}
               <div class="font-preset-group">
                 <span class="font-preset-group__label">{category}</span>
                 <div class="font-preset-chips">
-                  {#each FONT_PRESETS.filter(f => f.category === category) as preset}
+                  {#each allFontOptions.filter(f => f.category === category) as preset}
                     <button
                       type="button"
                       class="font-chip"
-                      class:font-chip--active={currentStyle.fontFamily === preset.value}
+                      class:font-chip--active={!!currentStyle.fontFamily && primaryFamily(currentStyle.fontFamily) === primaryFamily(preset.value)}
                       style="font-family:{preset.value}"
                       onclick={() => patchSelectedStyle({
-                        fontFamily: currentStyle.fontFamily === preset.value ? null : preset.value
+                        fontFamily: primaryFamily(currentStyle.fontFamily) === primaryFamily(preset.value) ? null : preset.value
                       })}
                       title={preset.value}
                     >{preset.label}</button>
@@ -374,7 +545,7 @@
             class="input input--mono"
             type="text"
             value={currentStyle.fontFamily ?? ''}
-            placeholder='null (hereda) — o escribe: "Playfair Display", serif'
+            placeholder='Vacío = fuente base · o escribe: "Playfair Display", serif'
             oninput={(e) => {
               const raw = (e.currentTarget as HTMLInputElement).value.trim();
               patchSelectedStyle({ fontFamily: raw || null });
@@ -385,14 +556,14 @@
               type="button"
               class="font-clear-btn"
               onclick={() => patchSelectedStyle({ fontFamily: null })}
-            >✕ Limpiar (heredar fuente del libro)</button>
+            >✕ Usar la fuente base del libro</button>
           {/if}
         </div>
 
         <div class="sample-card">
           <span class="sample-card__eyebrow">Vista rápida</span>
           <div class="sample-card__sheet">
-            <div class="sample-card__text" style={selectedPreviewCss}>
+            <div class="sample-card__text" style="font-family:{baseFont};{selectedPreviewCss}">
               {currentMeta.sampleText}
             </div>
           </div>
@@ -506,6 +677,40 @@
     gap: 16px;
     min-height: 0;
   }
+  .fonts-panel {
+    margin-bottom: 16px;
+  }
+  .fonts-panel__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .fonts-panel__head .save-btn { flex-shrink: 0; }
+  .font-family-list {
+    list-style: none;
+    margin: 12px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .font-family-item {
+    display: grid;
+    grid-template-columns: minmax(160px, 1fr) 2fr auto;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+  }
+  .font-family-item__name { font-size: 18px; color: #fff; }
+  .font-family-item__variants { font-size: 12px; color: rgba(255, 255, 255, 0.6); }
+  .font-family-item__actions { display: flex; gap: 6px; }
+  .font-rename { max-width: 260px; }
+  .base-font-field { margin-top: 14px; max-width: 420px; }
+
   .panel {
     border-radius: 18px;
     background: rgba(255,255,255,0.03);
@@ -606,10 +811,6 @@
     color: rgba(255,255,255,0.35);
     margin: 0 0 8px;
     line-height: 1.5;
-  }
-  .field-hint strong {
-    color: rgba(122,184,232,0.8);
-    font-family: monospace;
   }
   /* Separador de sección en el editor */
   .field-section-title {

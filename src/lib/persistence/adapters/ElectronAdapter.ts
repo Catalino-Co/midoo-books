@@ -176,8 +176,8 @@ export class ElectronAdapter implements IPlatformAdapter {
     return (res as { deleted: boolean }).deleted;
   }
 
-  async pickAndImportAssets(bookId: string): Promise<Asset[]> {
-    const res = await this.api.assets.pickAndImport(bookId);
+  async pickAndImportAssets(bookId: string, kind: 'image' | 'font' = 'image'): Promise<Asset[]> {
+    const res = await this.api.assets.pickAndImport(bookId, kind);
     if (res && 'error' in res) throw new Error((res as { error: string }).error);
     return (res as { imported: Asset[] }).imported;
   }

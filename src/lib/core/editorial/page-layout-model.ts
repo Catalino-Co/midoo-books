@@ -33,6 +33,8 @@ export interface PlacedBlock {
   estimatedUnits: number;
   /** Composición que debe ocupar el cuerpo completo de la página (apertura de capítulo). */
   fullPageComposition?: boolean;
+  /** Caja calculada por el motor para bloques IMAGE en el flujo (no fillPage). */
+  imageBox?: PlacedImageBox;
   tocEntries?: TocEntry[];
   tocConfig?: TocConfig;
   syntheticType?: 'TOC';
@@ -85,6 +87,8 @@ export interface BookLayoutSnapshot {
   layoutSettings: LayoutSettings;
   sections: DocumentSection[];
   blocksBySectionId: Record<string, DocumentBlock[]>;
+  /** Dimensiones de los assets del libro por id (opcional; sin ellas se asume 4:3). */
+  assetDimensionsById?: Record<string, AssetDimensions>;
 }
 
 /** Métricas internas del motor de paginación (PARTE 13). */
@@ -92,6 +96,23 @@ export interface LayoutEngineMetrics {
   pageBodyHeightUnits: number;
   pageBodyWidthUnits: number;
   charsPerLine: number;
+  /** Unidades del motor por mm (en el navegador: px CSS por mm = 96/25,4). */
+  unitsPerMm?: number;
+  /** Caja de texto real en mm (hoja − márgenes). El medidor la usa tal cual. */
+  contentWidthMm?: number;
+  contentHeightMm?: number;
+}
+
+/** Dimensiones intrínsecas de un asset de imagen (para calcular su alto en la página). */
+export interface AssetDimensions {
+  widthPx: number | null;
+  heightPx: number | null;
+}
+
+/** Caja final de una imagen colocada en el flujo (mm, la usan preview y PDF por igual). */
+export interface PlacedImageBox {
+  widthMm: number;
+  heightMm: number;
 }
 
 export interface PaginatedBookResult {

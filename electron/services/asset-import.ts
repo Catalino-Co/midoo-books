@@ -9,6 +9,7 @@ import { createHash } from 'crypto';
 import * as AssetRepo from '../database/repositories/AssetRepository';
 import { getBookMediaDir } from '../lib/book-media-paths';
 import { readImageDimensions } from '../lib/image-dimensions';
+import { fontMimeForExt, isFontExtension, readFontMetadata } from '../lib/font-metadata';
 import type { Asset, AssetType } from '../../src/lib/core/domain/asset';
 
 export interface ImportAssetFileOptions {
@@ -31,14 +32,16 @@ export function importAssetFromPath(options: ImportAssetFileOptions): Asset {
   const hash = createHash('sha256').update(buf).digest('hex');
   const orig = basename(sourcePath);
   const ext  = extname(orig) || '.bin';
+  const isFont = isFontExtension(ext);
   const id   = crypto.randomUUID();
-  const filename = `img-${id}${ext}`;
+  const filename = `${isFont ? 'font' : 'img'}-${id}${ext}`;
   const mediaDir = getBookMediaDir(bookId);
   const destAbs  = `${mediaDir}/${filename}`;
   copyFileSync(sourcePath, destAbs);
 
   const storagePath = `media/${filename}`;
-  const dims        = readImageDimensions(buf);
+  const dims        = isFont ? null : readImageDimensions(buf);
+  const fontMeta    = isFont ? readFontMetadata(buf, orig) : null;
 
   const mimeGuess =
     ext.toLowerCase() === '.png'  ? 'image/png'
@@ -46,12 +49,14 @@ export function importAssetFromPath(options: ImportAssetFileOptions): Asset {
     : ext.toLowerCase() === '.gif' ? 'image/gif'
     : ext.toLowerCase() === '.webp' ? 'image/webp'
     : ext.toLowerCase() === '.svg' ? 'image/svg+xml'
+    : isFont ? fontMimeForExt(ext)
     : 'application/octet-stream';
 
   return AssetRepo.createAsset({
     id,
     bookId,
-    assetType:     options.assetType ?? 'image',
+    // Una fuente siempre se registra como 'font', aunque el llamador pida 'image'.
+    assetType:     isFont ? 'font' : (options.assetType ?? 'image'),
     filename,
     originalName:  orig,
     mimeType:      mimeGuess,
@@ -63,5 +68,8 @@ export function importAssetFromPath(options: ImportAssetFileOptions): Asset {
     checksum:      hash,
     altText:       options.altText ?? '',
     caption:       '',
+    fontFamily:    fontMeta?.family ?? null,
+    fontWeight:    fontMeta?.weight ?? null,
+    fontStyle:     fontMeta?.style ?? null,
   });
 }

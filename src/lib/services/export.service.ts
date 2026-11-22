@@ -20,6 +20,8 @@ import type { DocumentBlock }  from '$lib/core/domain/block';
 import type { Asset }          from '$lib/core/domain/asset';
 import type { ExportJob, ExportType, CreateExportJobInput, UpdateExportJobInput } from '$lib/core/domain/export';
 import { bookToMarkdown }      from '$lib/core/editorial/blocks-to-markdown';
+import { resolveBookStyles }   from '$lib/core/editorial/book-styles';
+import { bookBaseFontFamily }  from '$lib/core/editorial/block-render-css';
 
 // ─── Tipo agregado ────────────────────────────────────────────────────────────
 
@@ -113,7 +115,7 @@ function blockImageAssets(
 
   for (const s of sections) {
     for (const b of blocksBySectionId[s.id] ?? []) {
-      if (b.blockType !== 'IMAGE') continue;
+      if (b.blockType !== 'IMAGE' && b.blockType !== 'CHAPTER_OPENING') continue;
       let parsed: { assetId?: string } = {};
       try { parsed = JSON.parse(b.contentJson ?? '{}'); } catch { /* noop */ }
       const id = parsed.assetId;
@@ -126,6 +128,7 @@ function blockImageAssets(
         ext === 'png'  ? 'image/png' :
         ext === 'gif'  ? 'image/gif' :
         ext === 'webp' ? 'image/webp' :
+        ext === 'svg'  ? 'image/svg+xml' :
         'image/jpeg';
       result.push({ assetId: id, mimeType, storagePath: asset.storagePath });
     }
@@ -183,8 +186,14 @@ function blocksToXhtml(
         break;
       }
       case 'CHAPTER_OPENING': {
-        let co: { chapterLabel?: string; title?: string; subtitle?: string } = {};
+        let co: { chapterLabel?: string; title?: string; subtitle?: string; assetId?: string } = {};
         try { co = JSON.parse(b.contentJson ?? '{}'); } catch { /* noop */ }
+        const coFile = co.assetId ? assetFilenames.get(co.assetId) : undefined;
+        if (coFile) {
+          lines.push('  <figure class="chapter-opening">');
+          lines.push(`    <img src="../images/${coFile}" alt=""/>`);
+          lines.push('  </figure>');
+        }
         if (co.chapterLabel) lines.push(`  <p class="chapter-label">${xmlEsc(co.chapterLabel)}</p>`);
         if (co.title)        lines.push(`  <h1 class="chapter-title">${xmlEsc(co.title)}</h1>`);
         if (co.subtitle)     lines.push(`  <p class="chapter-subtitle">${xmlEsc(co.subtitle)}</p>`);
@@ -220,10 +229,46 @@ async function buildEpubZip(data: BookExportData, bookId: string): Promise<Uint8
     '</container>',
   ].join('\n'));
 
+  // Fuentes propias del libro → OEBPS/fonts/ + @font-face (reflowable: solo familia)
+  const fontAssets = data.assets.filter(a => a.assetType === 'font' && a.fontFamily);
+  const fontFiles: { id: string; href: string; mime: string }[] = [];
+  const fontFaceCss: string[] = [];
+  await Promise.all(fontAssets.map(async (a) => {
+    const ext = (a.fileExt || '.ttf').replace(/^\./, '').toLowerCase();
+    const filename = `${a.id}.${ext}`;
+    try {
+      const resp = await fetch(assetDisplayUrl(bookId, a.storagePath));
+      if (!resp.ok) return;
+      zip.file(`OEBPS/fonts/${filename}`, await resp.arrayBuffer());
+      fontFiles.push({ id: `font-${a.id}`, href: `fonts/${filename}`, mime: a.mimeType || `font/${ext}` });
+      fontFaceCss.push(
+        `@font-face { font-family: '${String(a.fontFamily).replace(/'/g, "\\'")}'; `
+        + `src: url('../fonts/${filename}'); font-weight: ${a.fontWeight ?? 400}; `
+        + `font-style: ${a.fontStyle === 'italic' ? 'italic' : 'normal'}; }`,
+      );
+    } catch {
+      // Fuente no disponible: el lector usará su fuente por defecto
+    }
+  }));
+
+  const roleStyles = resolveBookStyles(data.layout);
+  const familyRule = (selector: string, family: string | null) =>
+    family ? `${selector} { font-family: ${family}; }` : '';
+
   // Styles
   const css = [
-    'body { font-family: Georgia, serif; font-size: 1em; line-height: 1.5; margin: 0; padding: 0; }',
+    ...fontFaceCss,
+    `body { font-family: ${bookBaseFontFamily(data.layout)}; font-size: 1em; line-height: 1.5; margin: 0; padding: 0; }`,
     'h1, h2, h3, h4 { font-family: inherit; }',
+    familyRule('p', roleStyles.PARAGRAPH.fontFamily),
+    familyRule('h1', roleStyles.HEADING_1.fontFamily),
+    familyRule('h2', roleStyles.HEADING_2.fontFamily),
+    familyRule('h3', roleStyles.HEADING_3.fontFamily),
+    familyRule('h4', roleStyles.HEADING_4.fontFamily),
+    familyRule('blockquote', roleStyles.QUOTE.fontFamily),
+    familyRule('.chapter-label', roleStyles.CHAPTER_OPENING_LABEL.fontFamily),
+    familyRule('.chapter-title', roleStyles.CHAPTER_OPENING_TITLE.fontFamily),
+    '.chapter-opening { margin: 0 0 1em; text-align: center; }',
     '.centered { text-align: center; }',
     '.chapter-label { text-align: center; font-size: 0.85em; letter-spacing: 0.1em; text-transform: uppercase; }',
     '.chapter-title { text-align: center; font-size: 1.8em; margin: 0.5em 0; }',
@@ -231,7 +276,7 @@ async function buildEpubZip(data: BookExportData, bookId: string): Promise<Uint8
     '.page-break { page-break-after: always; height: 0; margin: 0; padding: 0; }',
     'hr { border: none; border-top: 1px solid currentColor; opacity: 0.4; margin: 1em 0; }',
     'img { max-width: 100%; }',
-  ].join('\n');
+  ].filter(Boolean).join('\n');
   zip.file('OEBPS/styles/main.css', css);
 
   // Content XHTML files
@@ -277,6 +322,10 @@ async function buildEpubZip(data: BookExportData, bookId: string): Promise<Uint8
     const id = `section-${String(i).padStart(3, '0')}`;
     manifestItems.push(`    <item id="${id}" href="content/${id}.xhtml" media-type="application/xhtml+xml"/>`);
     spineItems.push(`    <itemref idref="${id}"/>`);
+  }
+
+  for (const f of fontFiles) {
+    manifestItems.push(`    <item id="${f.id}" href="${f.href}" media-type="${f.mime}"/>`);
   }
 
   for (const img of imageEntries) {

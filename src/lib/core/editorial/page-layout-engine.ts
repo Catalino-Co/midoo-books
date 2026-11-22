@@ -13,7 +13,21 @@ import type { DocumentBlock } from '$lib/core/domain/block';
 import type { DocumentSection, SectionType } from '$lib/core/domain/section';
 import { DEFAULT_LAYOUT_SETTINGS } from '$lib/core/domain/layout';
 import { parseImageBlockContent } from './image-block-content';
-import type { BookLayoutSnapshot, PaginatedBookResult, PlacedBlock, RenderedPage } from './page-layout-model';
+import type {
+  AssetDimensions,
+  BookLayoutSnapshot,
+  PaginatedBookResult,
+  PlacedBlock,
+  PlacedImageBox,
+  RenderedPage,
+} from './page-layout-model';
+import {
+  IMAGE_BLOCK_MARGIN_PT,
+  IMAGE_CAPTION_FONT_PT,
+  IMAGE_CAPTION_GAP_PT,
+  IMAGE_CAPTION_LINE_HEIGHT,
+  SEPARATOR_BLOCK_HEIGHT_PX,
+} from './block-render-css';
 import { pageSpreadSide } from './page-layout-model';
 import { buildEditorialFrames } from './editorial-page-numbering';
 import {
@@ -43,14 +57,15 @@ const PARAGRAPH_TOP_UNITS = 16;
 const PARAGRAPH_CONTINUATION_TOP_UNITS = 8;
 const QUOTE_TOP_UNITS = 20;
 const MIN_PARAGRAPH_LINES_PER_FRAGMENT = 2;
-const MIN_PARAGRAPH_LINES_AT_PAGE_BOTTOM = 1;
+/** Huérfana: nunca dejar una sola línea de párrafo al pie de página. */
+const MIN_PARAGRAPH_LINES_AT_PAGE_BOTTOM = 2;
 const MIN_PARAGRAPH_LINES_AT_PAGE_TOP = 2;
 const KEEP_TOGETHER_MAX_PARAGRAPH_LINES = 4;
 const HEADING_KEEP_WITH_NEXT_LINES = 3;
 const SHORT_SPECIAL_BLOCK_MAX_UNITS = 220;
 const SPECIAL_BLOCK_MIN_BOTTOM_BREATHING_ROOM = 44;
 /** Solo holgura por redondeo medición/unidades; no inflar el presupuesto vertical (evita texto sobre el pie). */
-const PARAGRAPH_FIT_TOLERANCE_UNITS = 3;
+const PARAGRAPH_FIT_TOLERANCE_UNITS = 0;
 const TOC_ENTRY_UNITS = 26;
 const TOC_TITLE_UNITS = 52;
 const TOC_EMPTY_UNITS = 28;
@@ -91,7 +106,20 @@ export interface LayoutTextMeasurementAdapter {
     minLinesAtPageBottom: number;
     minLinesAtPageTop: number;
   }): MeasuredParagraphSplit | null;
+  /** Alto (unidades) de un pie de imagen con el CSS compartido. Opcional. */
+  measureCaption?(text: string): number;
 }
+
+const MM_PER_PT = 25.4 / 72;
+/** Proporción alto/ancho supuesta si el asset no tiene dimensiones (4:3). */
+const DEFAULT_IMAGE_ASPECT = 0.75;
+/** Alto del marcador de imagen sin asset (mm). */
+const IMAGE_PLACEHOLDER_HEIGHT_MM = 30;
+/**
+ * Si una imagen no cabe en el hueco restante pero cabría reducida a ≥ este factor de
+ * su alto previsto, se reduce en lugar de saltar de página (evita páginas medio vacías).
+ */
+const IMAGE_MIN_SHRINK_TO_FIT = 0.8;
 
 export interface BuildPaginatedLayoutOptions {
   engineMetrics?: LayoutEngineMetrics;
@@ -212,55 +240,6 @@ function maxParagraphLinesForUnits(
   return Math.max(0, Math.floor((maxUnits - topUnits) / Math.max(1, lineUnitsForStyle(style))));
 }
 
-function estimateBlockHeight(
-  block: DocumentBlock,
-  section: DocumentSection,
-  bodyH: number,
-  charsPerLine: number,
-  bookStyles: BookStyleMap,
-): number {
-  const paragraphStyle = bookStyles.PARAGRAPH;
-  const role = resolveBookStyleRoleForBlock(section.sectionType, block);
-  const roleStyle = role ? bookStyles[role] : null;
-  const roleCharsPerLine = roleStyle
-    ? charsPerLineForStyle(charsPerLine, roleStyle, paragraphStyle)
-    : charsPerLine;
-
-  switch (block.blockType) {
-    case 'HEADING_1':
-    case 'HEADING_2':
-    case 'PARAGRAPH':
-    case 'CENTERED_PHRASE':
-      if (roleStyle) {
-        return estimateTextBlockUnits(block.contentText, roleStyle, roleCharsPerLine);
-      }
-      break;
-    case 'QUOTE':
-      if (roleStyle) {
-        return estimateQuoteFragmentUnits(
-          totalLinesForText(block.contentText, roleCharsPerLine),
-          roleStyle,
-          false,
-          false,
-        );
-      }
-      break;
-    case 'IMAGE': {
-      const img = parseImageBlockContent(block.contentJson);
-      if (img.fillPage) return Math.floor(bodyH * 0.96);
-      return img.assetId ? 280 : 120;
-    }
-    case 'SEPARATOR':
-      return 40;
-    case 'PAGE_BREAK':
-      return 0;
-    case 'CHAPTER_OPENING':
-      return Math.floor(bodyH * 0.96);
-    case 'TITLE_PAGE':
-      return Math.floor(bodyH * 0.98);
-  }
-  return estimateTextBlockUnits(block.contentText, paragraphStyle, charsPerLine);
-}
 
 function estimateTocUnits(entryCount: number, includeTitle: boolean, bookStyles?: BookStyleMap): number {
   const titleUnits = includeTitle
@@ -288,6 +267,12 @@ class Paginator {
   private readonly layoutSettings: BookLayoutSnapshot['layoutSettings'];
   private readonly bookStyles: BookStyleMap;
   private readonly textMeasurement: LayoutTextMeasurementAdapter | null;
+  private readonly assetDimensions: Record<string, AssetDimensions>;
+  /**
+   * Hueco entre colocaciones. Con medición real es 0: cada bloque medido ya incluye
+   * sus márgenes y el render los respeta sin colapsar (envoltorios flow-root).
+   */
+  private readonly blockGap: number;
   private currentIdx = 0;
   private used = 0;
   private forceNext = false;
@@ -298,13 +283,76 @@ class Paginator {
     layoutSettings: BookLayoutSnapshot['layoutSettings'],
     bookStyles: BookStyleMap,
     textMeasurement: LayoutTextMeasurementAdapter | null,
+    assetDimensions: Record<string, AssetDimensions> = {},
   ) {
     this.bookId = bookId;
     this.metrics = metrics;
     this.layoutSettings = layoutSettings;
     this.bookStyles = bookStyles;
     this.textMeasurement = textMeasurement;
+    this.assetDimensions = assetDimensions;
+    this.blockGap = textMeasurement ? 0 : GAP_AFTER_BLOCK;
     this.appendContentPage();
+  }
+
+  /** Unidades del motor por mm (px CSS/mm en el navegador). */
+  private unitsPerMm(): number {
+    if (this.metrics.unitsPerMm && this.metrics.unitsPerMm > 0) return this.metrics.unitsPerMm;
+    const wMm = this.metrics.contentWidthMm;
+    return wMm && wMm > 0 ? this.metrics.pageBodyWidthUnits / wMm : 1;
+  }
+
+  private ptToUnits(pt: number): number {
+    return pt * MM_PER_PT * this.unitsPerMm();
+  }
+
+  /**
+   * Caja de una imagen en el flujo (no fillPage): ancho = % de la caja de texto,
+   * alto según la proporción real del asset; si no cabe en una página se reduce
+   * hasta caber. Devuelve la altura total (márgenes + imagen + pie) en unidades.
+   */
+  imageLayoutFor(block: DocumentBlock, maxUnits?: number): { units: number; box: PlacedImageBox } {
+    const img = parseImageBlockContent(block.contentJson);
+    const upm = this.unitsPerMm();
+    const columnWidthMm = this.metrics.contentWidthMm ?? this.metrics.pageBodyWidthUnits / upm;
+    const marginUnits = this.ptToUnits(IMAGE_BLOCK_MARGIN_PT) * 2;
+
+    let captionUnits = 0;
+    const caption = img.caption.trim();
+    if (caption) {
+      if (this.textMeasurement?.measureCaption) {
+        captionUnits = this.textMeasurement.measureCaption(caption);
+      } else {
+        const charsPerLine = Math.max(12, Math.round(this.metrics.charsPerLine * 1.25));
+        const lines = Math.max(1, Math.ceil(caption.length / charsPerLine));
+        captionUnits = this.ptToUnits(IMAGE_CAPTION_GAP_PT)
+          + lines * this.ptToUnits(IMAGE_CAPTION_FONT_PT * IMAGE_CAPTION_LINE_HEIGHT);
+      }
+    }
+
+    const dims = img.assetId ? this.assetDimensions[img.assetId] : undefined;
+    let widthMm = columnWidthMm * (img.widthPercent / 100);
+    let heightMm: number;
+    if (!img.assetId) {
+      heightMm = IMAGE_PLACEHOLDER_HEIGHT_MM;
+    } else {
+      const aspect = dims?.widthPx && dims?.heightPx && dims.widthPx > 0
+        ? dims.heightPx / dims.widthPx
+        : DEFAULT_IMAGE_ASPECT;
+      heightMm = widthMm * aspect;
+      const budgetUnits = Math.min(this.metrics.pageBodyHeightUnits, maxUnits ?? Number.POSITIVE_INFINITY);
+      const maxHeightMm = Math.max(
+        10,
+        (budgetUnits - marginUnits - captionUnits) / upm,
+      );
+      if (heightMm > maxHeightMm) {
+        heightMm = maxHeightMm;
+        widthMm = heightMm / aspect;
+      }
+    }
+
+    const units = Math.ceil(heightMm * upm + marginUnits + captionUnits);
+    return { units, box: { widthMm, heightMm } };
   }
 
   private makePage(kind: RenderedPage['kind']): RenderedPage {
@@ -372,7 +420,7 @@ class Paginator {
   }
 
   private placementGapBefore(): number {
-    return this.pages[this.currentIdx].placements.length > 0 ? GAP_AFTER_BLOCK : 0;
+    return this.pages[this.currentIdx].placements.length > 0 ? this.blockGap : 0;
   }
 
   private availableForPlacement(): number {
@@ -402,6 +450,8 @@ class Paginator {
     if (
       block.blockType !== 'HEADING_1'
       && block.blockType !== 'HEADING_2'
+      && block.blockType !== 'HEADING_3'
+      && block.blockType !== 'HEADING_4'
       && block.blockType !== 'PARAGRAPH'
       && block.blockType !== 'QUOTE'
       && block.blockType !== 'CENTERED_PHRASE'
@@ -456,10 +506,10 @@ class Paginator {
       case 'IMAGE': {
         const img = parseImageBlockContent(block.contentJson);
         if (img.fillPage) return Math.floor(this.metrics.pageBodyHeightUnits * 0.96);
-        return img.assetId ? 280 : 120;
+        return this.imageLayoutFor(block).units;
       }
       case 'SEPARATOR':
-        return 40;
+        return this.textMeasurement ? SEPARATOR_BLOCK_HEIGHT_PX : 40;
       case 'PAGE_BREAK':
         return 0;
       case 'CHAPTER_OPENING':
@@ -618,7 +668,7 @@ class Paginator {
 
     const resolvedHeadingUnits = this.estimateBlockHeightForPlacement(block, section);
     const nextUnits = this.minimumNextBlockUnits(next, section);
-    const requiredUnits = resolvedHeadingUnits + GAP_AFTER_BLOCK + nextUnits;
+    const requiredUnits = resolvedHeadingUnits + this.blockGap + nextUnits;
 
     return requiredUnits > this.availableForPlacement();
   }
@@ -1009,9 +1059,20 @@ class Paginator {
     }
 
     let h = this.estimateBlockHeightForPlacement(block, section);
+    let imageBox = block.blockType === 'IMAGE' ? this.imageLayoutFor(block).box : undefined;
+
+    // Imagen que casi cabe: reducirla un poco antes que dejar media página vacía.
+    if (block.blockType === 'IMAGE' && imageBox && h > this.availableForPlacement() && this.used > 0) {
+      const fitted = this.imageLayoutFor(block, this.availableForPlacement());
+      if (fitted.box.heightMm >= imageBox.heightMm * IMAGE_MIN_SHRINK_TO_FIT && fitted.units <= this.availableForPlacement()) {
+        h = fitted.units;
+        imageBox = fitted.box;
+        this.pages[this.currentIdx].debugNotes.push('Imagen reducida para caber en la página');
+      }
+    }
 
     if (block.keepTogether && next) {
-      const combined = h + GAP_AFTER_BLOCK + this.estimateBlockHeightForPlacement(next, section);
+      const combined = h + this.blockGap + this.estimateBlockHeightForPlacement(next, section);
       if (combined > this.availableForPlacement()) {
         this.startNewContentPage('keepTogether con el bloque siguiente');
       }
@@ -1028,11 +1089,13 @@ class Paginator {
         );
       }
       h = this.estimateBlockHeightForPlacement(block, section);
+      if (block.blockType === 'IMAGE') imageBox = this.imageLayoutFor(block).box;
     }
 
     const placed: PlacedBlock = {
       block,
       estimatedUnits: h,
+      imageBox,
       debugMeta: {
         fragmented: false,
         keepTogetherApplied: block.keepTogether,
@@ -1062,7 +1125,7 @@ class Paginator {
       p.layoutMeta.bodyHeightUnits = this.metrics.pageBodyHeightUnits;
       const n = p.placements.length;
       const sumU = p.placements.reduce((s, x) => s + x.estimatedUnits, 0);
-      p.layoutMeta.usedContentUnits = sumU + (n > 0 ? (n - 1) * GAP_AFTER_BLOCK : 0);
+      p.layoutMeta.usedContentUnits = sumU + (n > 0 ? (n - 1) * this.blockGap : 0);
     }
   }
 }
@@ -1100,6 +1163,7 @@ function paginateBookPass(
     snapshot.layoutSettings,
     resolveBookStyles(snapshot.layoutSettings),
     textMeasurement,
+    snapshot.assetDimensionsById ?? {},
   );
 
   let first = true;

@@ -267,7 +267,7 @@ export class WebAdapter implements IPlatformAdapter {
   deleteAsset(_id: string): Promise<boolean> {
     return Promise.resolve(false);
   }
-  pickAndImportAssets(_bookId: string): Promise<Asset[]> {
+  pickAndImportAssets(_bookId: string, _kind?: 'image' | 'font'): Promise<Asset[]> {
     return Promise.reject(new Error('WebAdapter: assets solo en Electron (PARTE 8).'));
   }
   importAssetFiles(_bookId: string, _paths: string[]): Promise<Asset[]> {

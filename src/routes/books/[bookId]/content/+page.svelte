@@ -51,6 +51,8 @@
     type BlockEmphasis,
     parseImageBlockContent,
     serializeImageBlockContent,
+    IMAGE_WIDTH_PERCENT_OPTIONS,
+    DEFAULT_IMAGE_WIDTH_PERCENT,
     parseChapterOpeningContent,
     serializeChapterOpeningContent,
     EMPTY_CHAPTER_OPENING_CONTENT,
@@ -603,6 +605,7 @@
   let insp_bImageAlt       = $state('');
   let insp_bImageCaption   = $state('');
   let insp_bImageFillPage  = $state(false);
+  let insp_bImageWidthPercent = $state<number>(DEFAULT_IMAGE_WIDTH_PERCENT);
 
   let insp_bCoLabel          = $state('');
   let insp_bCoTitle          = $state('');
@@ -621,6 +624,10 @@
   let insp_bTpTextAlign      = $state<TitlePageTextAlign>('center');
 
   let bookAssets           = $state<Asset[]>([]);
+
+  /** Solo imágenes (las fuentes del libro también son assets, pero no van en bloques). */
+
+  let bookImageAssets = $derived(bookAssets.filter(a => a.assetType !== 'font'));
 
   // Suciedad del inspector
   let inspectorDirty = $state(false);
@@ -897,11 +904,13 @@
       insp_bImageAlt     = img.altText;
       insp_bImageCaption = img.caption;
       insp_bImageFillPage = img.fillPage;
+      insp_bImageWidthPercent = img.widthPercent;
     } else {
       insp_bImageAssetId = '';
       insp_bImageAlt     = '';
       insp_bImageCaption = '';
       insp_bImageFillPage = false;
+      insp_bImageWidthPercent = DEFAULT_IMAGE_WIDTH_PERCENT;
     }
     if (block.blockType === 'CHAPTER_OPENING') {
       const co = parseChapterOpeningContent(block.contentJson);
@@ -1022,6 +1031,7 @@
           altText: insp_bImageAlt,
           caption: insp_bImageCaption,
           fillPage: insp_bImageFillPage,
+          widthPercent: insp_bImageWidthPercent,
         });
       } else if (insp_bType === 'CHAPTER_OPENING') {
         contentJsonPayload = serializeChapterOpeningContent({
@@ -1254,6 +1264,7 @@
           altText: '',
           caption: '',
           fillPage: false,
+          widthPercent: DEFAULT_IMAGE_WIDTH_PERCENT,
         }),
       };
     }
@@ -2664,7 +2675,7 @@
                 onchange={() => { markInspectorDirty(); onInspectorBlur(); }}
               >
                 <option value="">— Sin imagen —</option>
-                {#each bookAssets as a}
+                {#each bookImageAssets as a}
                   <option value={a.id}>{a.originalName}</option>
                 {/each}
               </select>
@@ -2700,6 +2711,21 @@
                 maxlength={2000}
                 placeholder="Pie de foto (opcional)"
               ></textarea>
+            </div>
+            <div class="insp-field">
+              <label class="insp-label" for="ib-img-width">Ancho en la página</label>
+              <select
+                id="ib-img-width"
+                class="insp-select"
+                bind:value={insp_bImageWidthPercent}
+                disabled={insp_bImageFillPage}
+                onchange={() => { markInspectorDirty(); onInspectorBlur(); }}
+              >
+                {#each IMAGE_WIDTH_PERCENT_OPTIONS as w}
+                  <option value={w}>{w === 100 ? 'Todo el ancho del texto' : `${w} % del ancho`}</option>
+                {/each}
+              </select>
+              <span class="insp-hint">El alto se calcula con la proporción de la imagen; si no cabe en la página pasa a la siguiente.</span>
             </div>
             <div class="insp-field insp-field--inline">
               <label class="insp-label insp-label--inline" for="ib-img-fillpage">
@@ -2785,7 +2811,7 @@
                 onchange={() => { markInspectorDirty(); onInspectorBlur(); }}
               >
                 <option value="">— Sin imagen —</option>
-                {#each bookAssets as a}
+                {#each bookImageAssets as a}
                   <option value={a.id}>{a.originalName}</option>
                 {/each}
               </select>

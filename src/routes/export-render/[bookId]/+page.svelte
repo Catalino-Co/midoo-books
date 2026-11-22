@@ -2,145 +2,97 @@
   /**
    * /export-render/[bookId]/+page.svelte
    *
-   * Ruta sin chrome usada por exports:renderPdf (BrowserWindow oculto).
-   * printToPDF necesita:
-   *   1. Cada .export-page con dimensiones físicas exactas en mm
-   *   2. Márgenes aplicados como padding en mm (NO posicionamiento absoluto)
-   *   3. page-break-after:always entre páginas
-   *   4. window.__exportReady  → Promise que resuelve cuando el DOM está pintado
-   *   5. window.__exportPageDims → { width, height, unit: 'mm' }
+   * Ruta sin interfaz que el proceso main abre en una ventana oculta y imprime a PDF
+   * (exports:renderPdf). Dibuja TODAS las páginas con BookPage.svelte, el mismo
+   * componente de la vista previa, así que el PDF es la vista previa.
+   *
+   * Contrato con el proceso main:
+   *   - @page { size: <ancho>mm <alto>mm; margin: 0 } → tamaño real de la hoja
+   *     (printToPDF con preferCSSPageSize: true).
+   *   - window.__exportReady → Promise que resuelve con
+   *       { ok: true, pages, widthMm, heightMm }  cuando el layout está pintado,
+   *       las fuentes cargadas y TODAS las imágenes decodificadas;
+   *       { ok: false, error }                    si algo falla.
+   *   - Además se emite el evento 'export-ready' con el mismo detalle.
    */
   import { page } from '$app/stores';
+  import { tick } from 'svelte';
   import { loadBookLayoutSnapshot, computePaginatedPreviewForBrowser } from '$lib/services/preview-layout.service';
   import { listAssets } from '$lib/services/assets.service';
-  import { pageDimensionsMm, getPageContentBoxMm } from '$lib/core/editorial/document-page-geometry';
-  import {
-    resolveBookStyles,
-    resolveEffectiveBookStyleForBlock,
-    buildBookStyleCss,
-    type BookStyleDefinition,
-  } from '$lib/core/editorial/book-styles';
-  import { assetDisplayUrl } from '$lib/services/assets.service';
-  import {
-    parseImageBlockContent,
-    parseChapterOpeningContent,
-    chapterOpeningPreviewRootClassNames,
-    parseTitlePageContent,
-  } from '$lib/services/content.service';
-  import type { PaginatedBookResult, PlacedBlock, RenderedPage } from '$lib/core/editorial/page-layout-model';
+  import { ensureBookFontsLoaded } from '$lib/services/book-fonts.service';
+  import { pageDimensionsMm } from '$lib/core/editorial/document-page-geometry';
+  import type { PaginatedBookResult } from '$lib/core/editorial/page-layout-model';
   import type { Asset } from '$lib/core/domain/asset';
+  import BookPage from '$lib/components/book/BookPage.svelte';
+
+  type ReadyDetail =
+    | { ok: true; pages: number; widthMm: number; heightMm: number }
+    | { ok: false; error: string };
 
   let bookId = $derived($page.params.bookId);
-  let format = $derived(($page.url.searchParams.get('format') ?? 'screen') as 'screen' | 'print');
 
   let layout    = $state<PaginatedBookResult | null>(null);
   let assets    = $state<Asset[]>([]);
   let loadError = $state<string | null>(null);
 
-  // ── Señales para el proceso principal ────────────────────────────────────────
-  // Se inicializan sincrónicamente para que estén disponibles cuando
+  // Señal para el proceso main: se crea de forma síncrona para que exista cuando
   // executeJavaScript('window.__exportReady') se evalúe tras loadURL().
-  let _exportResolve: (() => void) | null = null;
+  let resolveReady: ((d: ReadyDetail) => void) | null = null;
   if (typeof window !== 'undefined') {
-    (window as any).__exportReady    = new Promise<void>((res) => { _exportResolve = res; });
-    (window as any).__exportPageDims = null;
+    (window as any).__exportReady = new Promise<ReadyDetail>(res => { resolveReady = res; });
   }
 
-  // ── Carga de datos ────────────────────────────────────────────────────────────
+  function signal(detail: ReadyDetail) {
+    if (!resolveReady) return;
+    resolveReady(detail);
+    resolveReady = null;
+    document.dispatchEvent(new CustomEvent('export-ready', { detail }));
+  }
 
-  async function load() {
+  /** Espera a que todas las <img> de la página estén cargadas y decodificadas. */
+  async function waitForImages(): Promise<string[]> {
+    const imgs = Array.from(document.querySelectorAll<HTMLImageElement>('.export-root img'));
+    const failed: string[] = [];
+    await Promise.all(imgs.map(async img => {
+      try {
+        if (!img.complete) {
+          await new Promise<void>((res, rej) => {
+            img.addEventListener('load', () => res(), { once: true });
+            img.addEventListener('error', () => rej(new Error('error')), { once: true });
+          });
+        }
+        if (img.naturalWidth === 0) throw new Error('vacía');
+        await img.decode().catch(() => undefined);
+      } catch {
+        failed.push(img.currentSrc || img.src);
+      }
+    }));
+    return failed;
+  }
+
+  async function load(id: string) {
     try {
-      const snap = await loadBookLayoutSnapshot(bookId);
-      assets = await listAssets(bookId);
+      assets = await listAssets(id);
+      await ensureBookFontsLoaded(id, assets);
+      const snap = await loadBookLayoutSnapshot(id);
       layout = await computePaginatedPreviewForBrowser(snap);
 
-      const { widthMm, heightMm } = pageDimensionsMm(snap.layoutSettings);
-      if (typeof window !== 'undefined') {
-        (window as any).__exportPageDims = { width: widthMm, height: heightMm, unit: 'mm' };
-      }
+      await tick();
+      const failed = await waitForImages();
+      if (failed.length) console.warn('[export-render] Imágenes que no cargaron:', failed);
+      await document.fonts.ready;
+      // Dos frames para asegurar que el último layout está pintado.
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+      const { widthMm, heightMm } = pageDimensionsMm(layout.layoutSettings);
+      signal({ ok: true, pages: layout.pages.length, widthMm, heightMm });
     } catch (e) {
       loadError = e instanceof Error ? e.message : String(e);
-      // Resolver incluso en error para que printToPDF no espere 15 s
-      signalReady();
+      signal({ ok: false, error: loadError });
     }
   }
 
-  $effect(() => { if (bookId) void load(); });
-
-  function signalReady() {
-    if (typeof window === 'undefined' || !_exportResolve) return;
-    // setTimeout en lugar de requestAnimationFrame: en ventanas ocultas (show:false)
-    // los callbacks de rAF pueden no dispararse. setTimeout siempre se ejecuta.
-    // 150 ms es suficiente para que Svelte termine de renderizar el DOM.
-    setTimeout(() => {
-      _exportResolve?.();
-      _exportResolve = null;
-      document.dispatchEvent(new CustomEvent('export-ready'));
-    }, 150);
-  }
-
-  // Señalizar cuando layout esté disponible y el DOM renderizado
-  $effect(() => {
-    if (layout) signalReady();
-  });
-
-  // ── Helpers de render ──────────────────────────────────────────────────────────
-
-  function assetUrlFor(assetId: string | null | undefined): string | null {
-    if (!assetId) return null;
-    const a = assets.find(x => x.id === (assetId as any));
-    return a ? assetDisplayUrl(bookId, a.storagePath) : null;
-  }
-
-  function bodyText(pl: PlacedBlock): string {
-    return pl.textOverride ?? pl.block?.contentText ?? '';
-  }
-
-  function textStyle(pg: RenderedPage, pl: PlacedBlock): string {
-    if (!pl.block || !layout) return '';
-    const resolved = resolveEffectiveBookStyleForBlock(
-      layout.layoutSettings,
-      pg.primarySectionType ? { sectionType: pg.primarySectionType } : null,
-      pl.block,
-    );
-    return resolved ? buildBookStyleCss(resolved) : '';
-  }
-
-  function isFullPageImage(pg: RenderedPage, pl: PlacedBlock): boolean {
-    if (pl.block?.blockType !== 'IMAGE') return false;
-    const img = parseImageBlockContent(pl.block.contentJson);
-    return pg.primarySectionType === 'COVER' || img.fillPage;
-  }
-
-  function coTextStyle(style: BookStyleDefinition, align: 'left' | 'center' | 'right'): string {
-    return buildBookStyleCss({ ...style, textAlign: align }, { includeMargins: false });
-  }
-
-  /** Padding en mm para el body de cada página según sus márgenes configurados. */
-  function pagePaddingStyle(pg: RenderedPage): string {
-    if (!layout) return '';
-    const box = getPageContentBoxMm(layout.layoutSettings, pg.side);
-    // Altura explícita del body = altura página − margen top − margen bottom
-    // Evita que height:100% colapse en el pipeline de print de Chromium
-    const { heightMm } = pageDimensionsMm(layout.layoutSettings);
-    const bodyHeightMm = heightMm - box.marginTopMm - box.marginBottomMm;
-    return [
-      `padding-top:${box.marginTopMm}mm`,
-      `padding-right:${box.marginRightMm}mm`,
-      `padding-bottom:${box.marginBottomMm}mm`,
-      `padding-left:${box.marginLeftMm}mm`,
-      `min-height:${bodyHeightMm}mm`,
-    ].join(';');
-  }
-
-  /** Estilo de página con dimensiones físicas exactas. */
-  function pageStyle(pg: RenderedPage): string {
-    if (!layout) return '';
-    const { widthMm, heightMm } = pageDimensionsMm(layout.layoutSettings);
-    return `width:${widthMm}mm;min-height:${heightMm}mm;max-height:${heightMm}mm`;
-  }
-
-  let bookStyles = $derived(layout ? resolveBookStyles(layout.layoutSettings) : null);
+  $effect(() => { if (bookId) void load(bookId); });
 </script>
 
 <svelte:head>
@@ -152,235 +104,47 @@
 </svelte:head>
 
 {#if loadError}
-  <div style="color:#900;padding:20px;font-family:sans-serif">Error: {loadError}</div>
+  <div class="msg msg--error">Error: {loadError}</div>
 {:else if !layout}
-  <div style="padding:20px;color:#555;font-family:sans-serif">Cargando…</div>
+  <div class="msg">Cargando…</div>
 {:else}
   <div class="export-root">
     {#each layout.pages as pg (pg.internalIndex)}
-      <div class="export-page" style={pageStyle(pg)}>
-        {#if pg.kind === 'editorial_blank'}
-          <!-- página en blanco editorial -->
-        {:else}
-          <div class="export-body" style={pagePaddingStyle(pg)}>
-            {#each pg.placements as pl, pi (`${pl.block?.id ?? pl.syntheticType ?? 'syn'}-${pi}`)}
-              {#if pl.block?.blockType === 'IMAGE'}
-                {@const img = parseImageBlockContent(pl.block.contentJson)}
-                {@const url = assetUrlFor(img.assetId)}
-                {#if url}
-                  <figure class="blk-img" class:blk-img--fill={isFullPageImage(pg, pl)}>
-                    <img src={url} alt={img.altText ?? ''} />
-                    {#if img.caption?.trim() && !isFullPageImage(pg, pl)}
-                      <figcaption>{img.caption}</figcaption>
-                    {/if}
-                  </figure>
-                {/if}
-              {:else if pl.block?.blockType === 'CHAPTER_OPENING'}
-                {@const co = parseChapterOpeningContent(pl.block.contentJson)}
-                {@const cls = chapterOpeningPreviewRootClassNames(co)}
-                {#if bookStyles}
-                  <div class="blk-co {cls}">
-                    {#if co.chapterLabel.trim()}
-                      <div class="co-label" style={coTextStyle(bookStyles.CHAPTER_OPENING_LABEL, co.textAlign)}>{co.chapterLabel}</div>
-                    {/if}
-                    {#if co.title.trim()}
-                      <div class="co-title" style={coTextStyle(bookStyles.CHAPTER_OPENING_TITLE, co.textAlign)}>{co.title}</div>
-                    {/if}
-                  </div>
-                {/if}
-              {:else if pl.block?.blockType === 'TITLE_PAGE'}
-                {@const tp = parseTitlePageContent(pl.block.contentJson)}
-                {#if bookStyles}
-                  <div class="blk-tp" style="text-align:{tp.textAlign}">
-                    {#if tp.seriesLabel.trim()}
-                      <div class="tp-series" style={coTextStyle(bookStyles.HEADING_4, tp.textAlign)}>{tp.seriesLabel}</div>
-                    {/if}
-                    <div class="tp-title-area">
-                      {#if tp.title.trim()}
-                        <div class="tp-title" style={coTextStyle(bookStyles.TITLE, tp.textAlign)}>{tp.title}</div>
-                      {/if}
-                      {#if tp.subtitle.trim()}
-                        <div class="tp-subtitle" style={coTextStyle(bookStyles.HEADING_2, tp.textAlign)}>{tp.subtitle}</div>
-                      {/if}
-                    </div>
-                    {#if tp.authorLine.trim()}
-                      <div class="tp-author" style={coTextStyle(bookStyles.CENTERED_PHRASE, tp.textAlign)}>{tp.authorLine}</div>
-                    {/if}
-                    {#if tp.publisherInfo.trim()}
-                      <div class="tp-publisher" style={coTextStyle(bookStyles.PARAGRAPH, tp.textAlign)}>{tp.publisherInfo}</div>
-                    {/if}
-                  </div>
-                {/if}
-              {:else if pl.block?.blockType === 'HEADING_1'}
-                <h1 style={textStyle(pg, pl)}>{bodyText(pl)}</h1>
-              {:else if pl.block?.blockType === 'HEADING_2'}
-                <h2 style={textStyle(pg, pl)}>{bodyText(pl)}</h2>
-              {:else if pl.block?.blockType === 'HEADING_3'}
-                <h3 style={textStyle(pg, pl)}>{bodyText(pl)}</h3>
-              {:else if pl.block?.blockType === 'HEADING_4'}
-                <h4 style={textStyle(pg, pl)}>{bodyText(pl)}</h4>
-              {:else if pl.block?.blockType === 'SEPARATOR'}
-                <hr class="blk-sep" />
-              {:else if pl.block?.blockType === 'QUOTE'}
-                <blockquote class="blk-quote" style={textStyle(pg, pl)}>{bodyText(pl)}</blockquote>
-              {:else if pl.block?.blockType === 'CENTERED_PHRASE'}
-                <p class="blk-center" style={textStyle(pg, pl)}>{bodyText(pl)}</p>
-              {:else if pl.block?.blockType === 'PAGE_BREAK'}
-                <!-- salto de página explícito — ya es página separada -->
-              {:else if pl.block}
-                <p class="blk-p" style={textStyle(pg, pl)}>{bodyText(pl)}</p>
-              {/if}
-            {/each}
-          </div>
-        {/if}
+      <div class="export-page">
+        <BookPage {bookId} {layout} page={pg} {assets} mode="print" />
       </div>
     {/each}
   </div>
 {/if}
 
 <style>
-  /* ── Reset de la UI del editor para la ventana de render ── */
-  :global(html) {
-    background: white !important;
-    color: #111 !important;
-  }
+  :global(html),
   :global(body) {
     margin: 0 !important;
     padding: 0 !important;
-    background: white !important;
-    color: #111 !important;
-    /* Font base del libro — los elementos con fontFamily en inline style la sobreescriben */
-    font-family: 'Georgia', 'Times New Roman', serif;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
+    background: #ffffff !important;
+    color: #111111 !important;
   }
 
-  /* ── Contenedor raíz ── */
   .export-root {
-    background: white;
+    background: #ffffff;
   }
 
-  /* ── Página física ── */
+  /* Una hoja por página impresa. BookPage ya mide exactamente el tamaño de la hoja. */
   .export-page {
-    /* dimensiones seteadas inline con pageStyle() */
-    box-sizing: border-box;
-    position: relative;
-    background: white;
-    overflow: hidden;
-    page-break-after: always;
     break-after: page;
+    page-break-after: always;
+    break-inside: avoid;
+  }
+  .export-page:last-child {
+    break-after: auto;
+    page-break-after: auto;
   }
 
-  /* ── Cuerpo de la página (padding = márgenes físicos del libro) ── */
-  .export-body {
-    /* padding seteado inline con pagePaddingStyle() usando unidades mm */
-    box-sizing: border-box;
-    width: 100%;
-    /* NO height:100% — en modo print Chromium no resuelve % correctamente
-       y puede colapsar la altura a 0, ocultando todo el contenido.
-       Tampoco overflow:hidden — usamos la altura física de la página para clip. */
-    overflow: visible;
+  .msg {
+    padding: 20px;
+    color: #555;
+    font-family: sans-serif;
   }
-
-  /* ── Elementos de bloque ── */
-  h1, h2, h3, h4,
-  .blk-p, .blk-quote, .blk-center {
-    /* Los estilos tipográficos vienen de textStyle() / inline.
-       NO setear font-family aquí: los inline styles de buildBookStyleCss()
-       traen el fontFamily correcto (o null = hereda Georgia del body). */
-    margin: 0;
-    color: inherit;
-    /* Preservar saltos de línea explícitos (\n) del editor de contenido.
-       pre-wrap: colapsa múltiples espacios pero respeta \n y sigue haciendo
-       word-wrap — compatible con text-align:justify. */
-    white-space: pre-wrap;
-  }
-
-  .blk-sep {
-    border: none;
-    border-top: 1px solid currentColor;
-    opacity: 0.4;
-    margin: 0.5em 0;
-  }
-
-  .blk-quote {
-    border-left: 3px solid currentColor;
-    padding-left: 0.75em;
-    opacity: 0.85;
-  }
-
-  .blk-img {
-    margin: 0;
-    display: block;
-  }
-
-  .blk-img img {
-    display: block;
-    max-width: 100%;
-    height: auto;
-  }
-
-  .blk-img--fill {
-    position: absolute;
-    inset: 0;
-    overflow: hidden;
-  }
-
-  .blk-img--fill img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  .blk-img figcaption {
-    font-size: 0.8em;
-    color: #666;
-    text-align: center;
-    margin-top: 4px;
-  }
-
-  .blk-co {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.3em;
-    text-align: center;
-  }
-
-  /* ── TITLE_PAGE export render ────────────────────────────────────── */
-  .blk-tp {
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-    height: 100%;
-    min-height: inherit;
-  }
-  .tp-series    { padding-top: 18%; opacity: 0.7; }
-  .tp-title-area {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    padding: 4% 0;
-    gap: 0.35em;
-  }
-  .tp-subtitle  { opacity: 0.8; }
-  .tp-author    { padding-bottom: 6%; }
-  .tp-publisher { margin-top: auto; padding-bottom: 8%; opacity: 0.55; }
-
-  @media print {
-    .export-page {
-      page-break-after: always;
-      break-after: page;
-      /* En modo print no queremos overflow:hidden — dejar que la página dicte el clip */
-      overflow: visible;
-    }
-    .export-body {
-      overflow: visible;
-    }
-    /* Evitar que el sistema de impresión escale el contenido */
-    .export-root {
-      zoom: 1;
-    }
-  }
+  .msg--error { color: #900; }
 </style>

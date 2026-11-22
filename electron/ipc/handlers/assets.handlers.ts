@@ -48,15 +48,18 @@ export function registerAssetHandlers(): void {
     }),
   );
 
-  ipcMain.handle('assets:pickAndImport', async (_e, bookId: string) => {
+  ipcMain.handle('assets:pickAndImport', async (_e, bookId: string, kind: 'image' | 'font' = 'image') => {
     try {
+      const isFont = kind === 'font';
       const r = await dialog.showOpenDialog({
-        title:      'Añadir imágenes al libro',
+        title:      isFont ? 'Añadir fuentes al libro' : 'Añadir imágenes al libro',
         buttonLabel: 'Importar',
-        filters:    [
-          { name: 'Imágenes', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] },
-          { name: 'Todos', extensions: ['*'] },
-        ],
+        filters:    isFont
+          ? [{ name: 'Fuentes (TTF, OTF, WOFF, WOFF2)', extensions: ['ttf', 'otf', 'woff', 'woff2'] }]
+          : [
+            { name: 'Imágenes', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] },
+            { name: 'Todos', extensions: ['*'] },
+          ],
         properties: ['openFile', 'multiSelections'],
       });
       if (r.canceled || r.filePaths.length === 0) {
@@ -65,7 +68,7 @@ export function registerAssetHandlers(): void {
       const imported = [];
       for (const p of r.filePaths) {
         try {
-          imported.push(importAssetFromPath({ bookId, sourcePath: p, assetType: 'image' }));
+          imported.push(importAssetFromPath({ bookId, sourcePath: p, assetType: isFont ? 'font' : 'image' }));
         } catch (err) {
           console.warn('[assets:pickAndImport]', p, err);
         }

@@ -32,7 +32,7 @@ La separación contenido/presentación es absoluta: el texto vive en bloques est
 | **Svelte 5** | ^5.25 | UI con runes (`$state`, `$derived`, `$props`, `$effect`) |
 | **TypeScript** | ^5.8 | Tipado estricto en todo el proyecto |
 | **Vite** | ^6.2 | Bundler de desarrollo y build web |
-| **Electron** | ^31.7 | Shell nativo Windows/Mac/Linux |
+| **Electron** | ^45.4 | Shell nativo Windows/Mac/Linux |
 | **electron-builder** | ^25.1 | Empaquetado e instaladores (.exe, .dmg, .AppImage) |
 | **sql.js** | ^1.12 | SQLite en WASM puro (sin compilación nativa) |
 | **esbuild** | ^0.21 | Compilación de TypeScript de Electron → CJS |
@@ -286,17 +286,26 @@ Los estilos viven en `layout_settings.styles_json` como un `BookStyleMap` JSON s
 
 ## 7. Motor de paginación
 
-El motor (`page-layout-engine.ts`) es TypeScript puro que opera con **unidades lógicas** (enteros proporcionales al alto de página):
+El motor (`page-layout-engine.ts`) es TypeScript puro. En el navegador **1 unidad = 1 px CSS a 96 dpi**.
 
-1. **`computeLayoutEngineMetricsForPreviewWidth`** — traduce geometría física (mm) a píxeles a 96 dpi. Define `pageBodyHeightUnits`, `pageBodyWidthUnits`, `charsPerLine`.
-2. **`BrowserPreviewTextMeasurer`** — crea elementos DOM ocultos para medir texto real con la fuente correcta.
-3. **`buildPaginatedLayout`** — itera bloques, estima alturas, decide saltos de página, genera `PaginatedBookResult`.
-4. **`BookPagedPreview.svelte`** — renderiza el resultado con `transform: scale(zoom)` sobre dimensiones físicas reales (96 dpi), garantizando que 1 página en pantalla = 1 página en PDF.
+1. **`computeLayoutEngineMetricsForPreviewWidth`** — la caja de texto es exactamente la hoja menos los márgenes (`getEngineContentBoxMm`). Ya no se restan rellenos «de preview». Define `pageBodyHeightUnits`, `pageBodyWidthUnits`, `unitsPerMm`, `contentWidthMm`.
+2. **`BrowserPreviewTextMeasurer`** — mide en un elemento oculto del mismo ancho (en mm) y con el mismo CSS que el render (`block-render-css.ts`), incluida la fuente base del libro. Las fuentes propias se cargan antes de medir (`book-fonts.service.ts`).
+3. **`buildPaginatedLayout`** — itera bloques, mide alturas, decide saltos y genera `PaginatedBookResult`. Las imágenes en el flujo reciben `imageBox` (mm), calculado con el % de ancho del bloque y la proporción real del asset.
+4. **`BookPage.svelte`** (`src/lib/components/book/`) — **único componente que dibuja una página**. Lo usan la vista previa (`BookPagedPreview`, escalada con `transform: scale`) y la ruta `/export-render` que se imprime a PDF. Por eso la vista previa y el PDF son idénticos.
+
+### Invariantes (si se rompen, preview y PDF divergen)
+- Todo bloque de texto usa `textBlockCss()` tanto al medir como al pintar.
+- Cada bloque va en un envoltorio `display: flow-root` para que los márgenes no colapsen: la suma de alturas medidas es la altura pintada. Con medición real, el hueco entre bloques del motor es 0.
+- Cabecera y folio se dibujan dentro de los márgenes y no restan alto a la caja de texto.
+- Huérfanas: mínimo 2 líneas de párrafo al pie y 2 al inicio de página.
+- Una imagen que no cabe pasa a la página siguiente, salvo que reducida a ≥ 80 % de su alto quepa en el hueco.
 
 ### Reglas especiales de paginación
 - `PAGE_BREAK` → nueva página inmediata
 - `CHAPTER_OPENING`, `TITLE_PAGE` → página dedicada (nueva página antes y después)
-- `IMAGE` con `fillPage: true` → página dedicada
+- `IMAGE` con `fillPage: true` → página dedicada (ocupa la caja de texto)
+- `IMAGE` en sección `COVER` → hoja completa a sangre
+- `IMAGE` en el flujo → ancho `widthPercent` (100/75/50/33 % de la columna), alto según proporción
 - `keepTogether`, `pageBreakBefore`, `pageBreakAfter` → controlables por bloque
 
 ---
@@ -309,7 +318,7 @@ El motor (`page-layout-engine.ts`) es TypeScript puro que opera con **unidades l
 |---|---|---|
 | **PDF Pantalla** | `printToPDF` + BrowserWindow oculto | Dimensiones configuradas por CSS `@page`, RGB, optimizado para pantalla |
 | **PDF Impresión** | `printToPDF` + BrowserWindow oculto | Mismo motor, orientado a formato físico del libro |
-| **EPUB** | `jszip` | EPUB 3 reflowable con NCX EPUB 2. TOC navegable, imágenes embebidas |
+| **EPUB** | `jszip` | EPUB 3 reflowable con NCX EPUB 2. TOC navegable, imágenes (incluida la de apertura de capítulo) y fuentes propias embebidas |
 | **DOCX** | `docx` | Word compatible. Estilos de párrafo, headings, imágenes embebidas |
 | **Markdown** | Serialización pura JS | Frontmatter YAML, un archivo con todas las secciones |
 
@@ -317,12 +326,14 @@ El motor (`page-layout-engine.ts`) es TypeScript puro que opera con **unidades l
 ```
 exportPdf(bookId, format)
   → createExportJob (status: pending)
-  → IPC exports:renderPdf
+  → IPC exports:renderPdf            (el main construye la URL con ui-origin.ts; ignora baseUrl)
       → BrowserWindow oculto carga /export-render/[bookId]?format=screen|print
-      → Espera window.__exportReady (Promise expuesta por la ruta)
+      → Espera window.__exportReady → { ok, pages, widthMm, heightMm }
+        (layout pintado + fuentes cargadas + imágenes decodificadas; timeout 60 s → error)
       → win.show() off-screen (activa GPU compositor)
-      → printToPDF({ margins: none, printBackground: true })
-      → win.destroy()
+      → printToPDF({ preferCSSPageSize: true, margins: 0, printBackground: true })
+        (sin preferCSSPageSize Chromium ignora @page y saca tamaño Carta)
+      → win.destroy() en finally
   → IPC exports:saveFile (dialog nativo)
   → updateExportJob (status: completed, outputPath)
 ```
@@ -347,7 +358,7 @@ ventana en blanco.
 
 ### 9.2 `midoo-media://` — media local
 
-Las imágenes del libro se sirven con un protocolo personalizado de Electron:
+Las imágenes y fuentes del libro se sirven con un protocolo personalizado de Electron:
 
 ```
 midoo-media://r/{bookId}/{storagePath}
@@ -355,7 +366,15 @@ midoo-media://r/{bookId}/{storagePath}
 
 - Registrado en `register-media-protocol.ts` antes de que `ready-to-show` se dispare.
 - Permite usar las imágenes en el renderer (preview, inspector) y en la ruta de export-render con `fetch()`.
-- Almacenadas en `{userData}/midoo-books/assets/{bookId}/`.
+- Archivos en disco: `{userData}/books/{bookId}/media/`.
+- Las respuestas llevan `Access-Control-Allow-Origin: *` porque la UI descarga las fuentes con `fetch()` para registrarlas con `FontFace`.
+
+### 9.3 Fuentes propias del libro
+
+- Se importan desde **Estilos → Fuentes del libro** (`.ttf`, `.otf`, `.woff`, `.woff2`) como assets de tipo `font` (migración v12: `font_family`, `font_weight`, `font_style`).
+- Familia, peso y estilo se leen de las tablas `name`/`OS/2` (TTF/OTF) o se deducen del nombre del archivo (WOFF/WOFF2) — `electron/lib/font-metadata.ts`. La familia es editable.
+- `ensureBookFontsLoaded(bookId)` las registra con `FontFace` antes de medir, en la vista previa y en `/export-render`. Chromium las incrusta en el PDF; el EPUB las copia a `OEBPS/fonts/` con `@font-face`.
+- La **fuente base del libro** es `LayoutSettings.bodyFontFamily`; los estilos con `fontFamily = null` la heredan.
 
 ---
 

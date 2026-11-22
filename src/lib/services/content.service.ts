@@ -81,6 +81,8 @@ export { inferSectionTypeFromTitle } from '$lib/core/editorial/section-title-heu
 export {
   parseImageBlockContent,
   serializeImageBlockContent,
+  IMAGE_WIDTH_PERCENT_OPTIONS,
+  DEFAULT_IMAGE_WIDTH_PERCENT,
   type ImageBlockContent,
 } from '$lib/core/editorial/image-block-content';
 

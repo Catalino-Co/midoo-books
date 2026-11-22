@@ -8,7 +8,7 @@
  *   exports:update        — Actualiza status/outputPath/errorMsg de un job
  *   exports:listByBook    — Lista los últimos N jobs de un libro
  *   exports:clearHistory  — Borra todos los jobs de un libro
- *   exports:renderPdf     — Abre ventana oculta, espera Paged.js, captura PDF
+ *   exports:renderPdf     — Abre la ruta /export-render en una ventana oculta y la imprime a PDF
  *   exports:saveFile      — Guarda un Buffer en disco con dialog nativo
  */
 
@@ -16,14 +16,88 @@ import { ipcMain, dialog, BrowserWindow } from 'electron';
 import { writeFileSync } from 'fs';
 import { join } from 'path';
 import { ExportRepo } from '../../database/repositories/index';
+import { uiUrl } from '../../main/ui-origin';
 import type { CreateExportJobInput, UpdateExportJobInput } from '../../../src/lib/core/domain/export';
 
 // ─── Tipo de opciones de render PDF ──────────────────────────────────────────
 
 interface PdfRenderOptions {
   format: 'screen' | 'print';
-  /** URL base del devServer o app. Ej: http://localhost:5178 */
-  baseUrl: string;
+  /**
+   * @deprecated Se ignora. El proceso main construye la URL con ui-origin.ts para no
+   * abrir con el preload completo una URL enviada por el renderer. Se mantiene en la
+   * firma por compatibilidad con ElectronAdapter.
+   */
+  baseUrl?: string;
+}
+
+/** Tiempo máximo para que /export-render pagine, cargue fuentes e imágenes. */
+const EXPORT_READY_TIMEOUT_MS = 60_000;
+
+/**
+ * Renderiza el libro a PDF con la MISMA ruta y el MISMO componente de página que la
+ * vista previa (/export-render usa BookPage.svelte).
+ */
+async function renderBookPdf(bookId: string, format: 'screen' | 'print'): Promise<Buffer> {
+  const safeFormat = format === 'print' ? 'print' : 'screen';
+  const url = uiUrl(`/export-render/${encodeURIComponent(bookId)}?format=${safeFormat}`);
+
+  const win = new BrowserWindow({
+    // show:false puede dejar el compositor inactivo (páginas en blanco en printToPDF):
+    // se crea oculta y fuera de pantalla, y se muestra justo antes de imprimir.
+    show:   false,
+    x:      -10000,
+    y:      -10000,
+    width:  1280,
+    height: 900,
+    webPreferences: {
+      // Los BrowserWindow hijos no heredan el preload: la ruta necesita electronAPI
+      // para leer el libro de la BD.
+      preload:          join(__dirname, 'preload.cjs'),
+      nodeIntegration:  false,
+      contextIsolation: true,
+      sandbox:          false,
+    },
+  });
+
+  try {
+    await win.loadURL(url);
+
+    // /export-render expone window.__exportReady: resuelve con { ok, pages, ... } cuando
+    // el layout está pintado, las fuentes cargadas y todas las imágenes decodificadas.
+    const ready = await win.webContents.executeJavaScript(`
+      new Promise((resolve) => {
+        const timer = setTimeout(() => resolve({ ok: false, error: 'timeout' }), ${EXPORT_READY_TIMEOUT_MS});
+        const done = (v) => { clearTimeout(timer); resolve(v ?? { ok: true }); };
+        const fail = (e) => { clearTimeout(timer); resolve({ ok: false, error: String(e && e.message || e) }); };
+        if (window.__exportReady) window.__exportReady.then(done, fail);
+        else document.addEventListener('export-ready', (ev) => done(ev.detail), { once: true });
+      })
+    `) as { ok: boolean; error?: string; pages?: number; widthMm?: number; heightMm?: number };
+
+    if (!ready?.ok) {
+      throw new Error(
+        ready?.error === 'timeout'
+          ? `La vista de exportación no terminó en ${EXPORT_READY_TIMEOUT_MS / 1000} s.`
+          : `No se pudo preparar el PDF: ${ready?.error ?? 'error desconocido'}`,
+      );
+    }
+    console.log(`[PDF] ${ready.pages ?? '?'} páginas · ${ready.widthMm}×${ready.heightMm} mm`);
+
+    win.show();
+    await new Promise<void>(res => setTimeout(res, 200));
+
+    return await win.webContents.printToPDF({
+      // El tamaño lo dicta @page { size: <ancho>mm <alto>mm } de /export-render.
+      // Sin preferCSSPageSize, Chromium ignora @page y usa Carta (612×792 pt).
+      preferCSSPageSize: true,
+      // Márgenes en pulgadas (Electron ≥ 21); los márgenes del libro van en el HTML.
+      margins:           { top: 0, bottom: 0, left: 0, right: 0 },
+      printBackground:   true,
+    });
+  } finally {
+    if (!win.isDestroyed()) win.destroy();
+  }
 }
 
 interface SaveFileFilter {
@@ -76,115 +150,7 @@ export function registerExportHandlers(): void {
   // PDF via printToPDF ──────────────────────────────────────────────────────────
 
   ipcMain.handle('exports:renderPdf', async (_e, bookId: string, opts: PdfRenderOptions) =>
-    safeAsync(async () => {
-      const url = `${opts.baseUrl}/export-render/${encodeURIComponent(bookId)}?format=${opts.format}`;
-
-      // Ruta al preload compilado — mismo directorio que main.cjs (dist-electron/).
-      // Los BrowserWindow hijos NO heredan el preload automáticamente: hay que
-      // especificarlo explícitamente en cada nueva ventana.
-      const preloadPath = join(__dirname, 'preload.cjs');
-
-      const win = new BrowserWindow({
-        // show:false desactiva el compositor GPU en algunas versiones de Electron/Chromium,
-        // lo que provoca que printToPDF capture páginas en blanco.
-        // Solución: crear la ventana oculta pero mostrarla (fuera de pantalla) justo antes
-        // de printToPDF para garantizar que el pipeline de render esté activo.
-        show:   false,
-        x:      -10000,   // posición fuera de pantalla visible
-        y:      -10000,
-        width:  1280,
-        height: 900,
-        webPreferences: {
-          preload:          preloadPath,
-          nodeIntegration:  false,
-          contextIsolation: true,
-          // sandbox: false es necesario para que ipcRenderer funcione en el preload
-          sandbox:          false,
-        },
-      });
-
-      // loadURL resuelve cuando 'did-finish-load' se dispara
-      await win.loadURL(url);
-
-      // Esperar a que el renderer señalice que el contenido está listo.
-      // La ruta export-render expone window.__exportReady (Promise) y dispara
-      // el evento 'export-ready' cuando termina el render + requestAnimationFrame.
-      // Timeout de seguridad de 15 s para libros grandes.
-      await win.webContents.executeJavaScript(`
-        new Promise((resolve) => {
-          const TIMEOUT_MS = 15000;
-          const timer = setTimeout(resolve, TIMEOUT_MS);
-          function done() { clearTimeout(timer); resolve(undefined); }
-
-          if (window.__exportReady) {
-            window.__exportReady.then(done).catch(done);
-          } else {
-            // Fallback: el script aún no corrió — esperar al evento custom
-            document.addEventListener('export-ready', done, { once: true });
-          }
-        })
-      `);
-
-      // Leer dimensiones físicas de página (mm) expuestas por el renderer
-      const pageDims = await win.webContents.executeJavaScript(
-        'window.__exportPageDims || null'
-      ) as { width: number; height: number; unit: string } | null;
-
-      console.log('[PDF] pageDims recibidas:', pageDims);
-
-      // ── Diagnóstico del DOM antes de imprimir ────────────────────────────
-      const domSnap = await win.webContents.executeJavaScript(`
-        (function() {
-          const root = document.querySelector('.export-root');
-          if (!root) return 'NO .export-root';
-          const pages = root.querySelectorAll('.export-page');
-          const bodies = root.querySelectorAll('.export-body');
-          const first = bodies[0];
-          return JSON.stringify({
-            pageCount: pages.length,
-            bodyCount: bodies.length,
-            firstBodyHtml: first ? first.innerHTML.slice(0, 300) : null,
-            firstBodyVisible: first
-              ? { w: first.offsetWidth, h: first.offsetHeight, overflow: getComputedStyle(first).overflow }
-              : null,
-          });
-        })()
-      `).catch(() => 'executeJavaScript error');
-      console.log('[PDF] DOM snapshot:', domSnap);
-
-      // Activar el compositor GPU mostrando la ventana (está fuera de pantalla).
-      // Sin esto, show:false puede dejar el pipeline de render inactivo → páginas en blanco.
-      win.show();
-      // Breve pausa para que el frame pintado sea capturado por printToPDF
-      await new Promise<void>(res => setTimeout(res, 200));
-
-      // ── Opciones de printToPDF ───────────────────────────────────────────────
-      // IMPORTANTE: NO pasar pageSize como objeto { width, height } en micrones.
-      // Cuando se pasa así, Electron/Chromium genera un PDF con MediaBox en unidades
-      // internas (1/72000 mm ≈ 15 millones de unidades para una página A4), lo que
-      // hace que Adobe Acrobat y otros lectores muestren "dimensions out of range"
-      // y rendericen páginas en blanco.
-      //
-      // Solución: omitir pageSize aquí y dejar que la regla CSS
-      //   @page { size: Xmm Ymm; margin: 0 }
-      // (inyectada en <svelte:head> por /export-render) controle las dimensiones.
-      // Chromium respeta @page { size } y genera un MediaBox estándar en puntos PDF.
-      if (pageDims) {
-        console.log(`[PDF] dimensiones usadas por @page CSS: ${pageDims.width}×${pageDims.height}mm`);
-      } else {
-        console.warn('[PDF] pageDims no disponibles — se usará el tamaño definido en @page CSS o Letter por defecto');
-      }
-      const printOptions: Electron.PrintToPDFOptions = {
-        margins:         { marginType: 'none' },
-        printBackground: true,
-        // pageSize omitido intencionalmente — controlado por CSS @page { size }
-      };
-
-      const pdfBuffer = await win.webContents.printToPDF(printOptions);
-      win.destroy();
-
-      return pdfBuffer;
-    }),
+    safeAsync(() => renderBookPdf(bookId, opts.format)),
   );
 
   // Guardar archivo con diálogo nativo ─────────────────────────────────────────

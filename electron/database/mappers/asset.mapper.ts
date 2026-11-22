@@ -32,6 +32,9 @@ export function rowToAsset(row: Record<string, SqlValue>): Asset {
     checksum:      String(row.checksum ?? ''),
     altText:       String(row.alt_text ?? ''),
     caption:       String(row.caption ?? ''),
+    fontFamily:    row.font_family != null && String(row.font_family).trim() ? String(row.font_family) : null,
+    fontWeight:    row.font_weight != null ? Number(row.font_weight) : null,
+    fontStyle:     row.font_style === 'italic' ? 'italic' : row.font_style === 'normal' ? 'normal' : null,
     createdAt:     String(row.created_at ?? ''),
     updatedAt:     String(row.updated_at ?? ''),
   };

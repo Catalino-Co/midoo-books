@@ -15,6 +15,10 @@ function mimeForExt(ext: string): string {
   if (e === '.gif')  return 'image/gif';
   if (e === '.webp') return 'image/webp';
   if (e === '.svg')  return 'image/svg+xml';
+  if (e === '.ttf')   return 'font/ttf';
+  if (e === '.otf')   return 'font/otf';
+  if (e === '.woff')  return 'font/woff';
+  if (e === '.woff2') return 'font/woff2';
   return 'application/octet-stream';
 }
 
@@ -44,6 +48,9 @@ export function registerMidooMediaProtocol(): void {
         headers: {
           'Content-Type':  mime,
           'Cache-Control': 'private, max-age=3600',
+          // La UI (app://midoo o localhost en dev) descarga las fuentes con fetch()
+          // para registrarlas con FontFace: es una petición cross-origin.
+          'Access-Control-Allow-Origin': '*',
         },
       });
     } catch {

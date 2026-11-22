@@ -10,6 +10,20 @@ export interface ImageBlockContent {
   caption: string;
   /** Si es true, la imagen se maquetará como página completa. */
   fillPage: boolean;
+  /**
+   * Ancho de la imagen en el flujo, en % del ancho de la caja de texto (25–100).
+   * El alto se deduce de la proporción de la imagen. Ignorado si fillPage = true.
+   */
+  widthPercent: number;
+}
+
+/** Anchos ofrecidos en el inspector. */
+export const IMAGE_WIDTH_PERCENT_OPTIONS = [100, 75, 50, 33] as const;
+export const DEFAULT_IMAGE_WIDTH_PERCENT = 100;
+
+export function clampImageWidthPercent(v: unknown): number {
+  const n = typeof v === 'number' && Number.isFinite(v) ? v : DEFAULT_IMAGE_WIDTH_PERCENT;
+  return Math.min(100, Math.max(25, Math.round(n)));
 }
 
 export const EMPTY_IMAGE_BLOCK_CONTENT: ImageBlockContent = {
@@ -17,6 +31,7 @@ export const EMPTY_IMAGE_BLOCK_CONTENT: ImageBlockContent = {
   altText: '',
   caption: '',
   fillPage: false,
+  widthPercent: DEFAULT_IMAGE_WIDTH_PERCENT,
 };
 
 export function parseImageBlockContent(contentJson: string | null): ImageBlockContent {
@@ -31,7 +46,8 @@ export function parseImageBlockContent(contentJson: string | null): ImageBlockCo
     const altText = typeof o.altText === 'string' ? o.altText : '';
     const caption = typeof o.caption === 'string' ? o.caption : '';
     const fillPage = o.fillPage === true;
-    return { assetId, altText, caption, fillPage };
+    const widthPercent = clampImageWidthPercent(o.widthPercent);
+    return { assetId, altText, caption, fillPage, widthPercent };
   } catch {
     return { ...EMPTY_IMAGE_BLOCK_CONTENT };
   }
@@ -42,12 +58,14 @@ export function serializeImageBlockContent(c: ImageBlockContent): string | null 
     (c.assetId != null && c.assetId !== '')
     || c.altText.trim() !== ''
     || c.caption.trim() !== ''
-    || c.fillPage;
+    || c.fillPage
+    || clampImageWidthPercent(c.widthPercent) !== DEFAULT_IMAGE_WIDTH_PERCENT;
   if (!has) return null;
   return JSON.stringify({
     assetId: c.assetId && c.assetId !== '' ? c.assetId : null,
     altText: c.altText,
     caption: c.caption,
     fillPage: c.fillPage,
+    widthPercent: clampImageWidthPercent(c.widthPercent),
   });
 }

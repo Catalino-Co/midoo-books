@@ -80,7 +80,7 @@ export interface IPlatformAdapter {
   updateAsset(id: string, input: UpdateAssetInput):       Promise<Asset | null>;
   deleteAsset(id: string):                              Promise<boolean>;
   /** Diálogo nativo: importa una o varias imágenes al libro. */
-  pickAndImportAssets(bookId: string):                    Promise<Asset[]>;
+  pickAndImportAssets(bookId: string, kind?: 'image' | 'font'): Promise<Asset[]>;
   importAssetFiles(bookId: string, paths: string[]):     Promise<Asset[]>;
 
   // ── Exportación ───────────────────────────────────────────────────────────

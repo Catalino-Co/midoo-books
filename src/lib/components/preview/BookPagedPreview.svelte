@@ -1,32 +1,13 @@
 <script lang="ts">
   /**
-   * PARTE 9 — Render visual del resultado paginado (sin lógica de paginación).
+   * PARTE 9 — Vista previa paginada: miniaturas + barra + UNA página.
+   * La página la dibuja BookPage.svelte, el mismo componente que imprime el PDF.
    */
-  import type { PaginatedBookResult, PlacedBlock, RenderedPage } from '$lib/core/editorial/page-layout-model';
+  import type { PaginatedBookResult, RenderedPage } from '$lib/core/editorial/page-layout-model';
   import type { Asset } from '$lib/core/domain/asset';
   import { pageDimensionsMm } from '$lib/core/editorial/document-page-geometry';
-  import { physicalPageWidthPx, physicalPageHeightPx } from '$lib/services/preview-layout.service';
-  import {
-    buildPreviewSheetCssVars,
-    buildPreviewContentBoxStyle,
-    buildPreviewSafeAreaStyle,
-    buildPreviewBodyPaddingStyle,
-  } from '$lib/core/editorial/preview-page-style';
-  import {
-    resolveBookStyles,
-    resolveEffectiveBookStyleForBlock,
-    resolveEffectiveBookStyleInfoForBlock,
-    buildBookStyleCss,
-    type BookStyleDefinition,
-  } from '$lib/core/editorial/book-styles';
-  import { assetDisplayUrl } from '$lib/services/assets.service';
-  import {
-    parseImageBlockContent,
-    parseChapterOpeningContent,
-    chapterOpeningPreviewRootClassNames,
-    parseTitlePageContent,
-  } from '$lib/services/content.service';
-  import { sectionTypeLabel } from '$lib/services/content.service';
+  import { CSS_PX_PER_MM } from '$lib/core/editorial/document-layout-metrics';
+  import BookPage from '$lib/components/book/BookPage.svelte';
 
   let {
     bookId,
@@ -43,6 +24,8 @@
   } = $props();
 
   let activeIndex = $state(0);
+  /** Guías de caja de texto y zona segura (no salen en el PDF). */
+  let showGuides = $state(false);
 
   $effect(() => {
     const nextIndex = layout.pages.findIndex(page => page.physicalPageNumber === initialPhysicalPage);
@@ -52,7 +35,6 @@
   let activePage = $derived(layout.pages[Math.min(activeIndex, Math.max(0, layout.pages.length - 1))] ?? null);
 
   let layoutSettings = $derived(layout.layoutSettings);
-  let bookStyles = $derived(resolveBookStyles(layoutSettings));
 
   // ── Zoom ───────────────────────────────────────────────────────────────────
   const ZOOM_STEPS  = [0.40, 0.50, 0.65, 0.75, 0.85, 1.00, 1.25, 1.50];
@@ -72,108 +54,21 @@
   }
   function resetZoom() { zoom = ZOOM_DEFAULT; }
 
-  // ── Dimensiones físicas a 96 dpi ───────────────────────────────────────────
-  let physWidthPx  = $derived(physicalPageWidthPx(layoutSettings));
-  let physHeightPx = $derived(physicalPageHeightPx(layoutSettings));
-
-  // Dimensiones escaladas (lo que ocupa en el DOM)
-  let scaledWidthPx  = $derived(Math.round(physWidthPx  * zoom));
-  let scaledHeightPx = $derived(Math.round(physHeightPx * zoom));
+  // ── Dimensiones físicas a 96 dpi (sin redondear: misma hoja que el PDF) ─────
+  let physWidthPx  = $derived(pageDimensionsMm(layoutSettings).widthMm * CSS_PX_PER_MM);
+  let physHeightPx = $derived(pageDimensionsMm(layoutSettings).heightMm * CSS_PX_PER_MM);
 
   let pagedRootCss = $derived.by(() => {
-    const vars = buildPreviewSheetCssVars(layoutSettings);
-    const entries = Object.entries(vars).map(([k, v]) => `${k}:${v}`);
-    // Variables de dimensión física y zoom
-    entries.push(`--page-phys-w:${physWidthPx}px`);
-    entries.push(`--page-phys-h:${physHeightPx}px`);
-    entries.push(`--zoom:${zoom}`);
-    // --page-w / --page-h = dimensiones escaladas (para contenedores y thumb-col)
-    entries.push(`--page-w:${scaledWidthPx}px`);
-    entries.push(`--page-h:${scaledHeightPx}px`);
-    return entries.join(';');
-  });
-
-  let pageSheetExtraStyle = $derived.by(() => {
-    const bleed = Math.max(0, layoutSettings.bleedMm ?? 0);
-    if (bleed <= 0) return '';
-    const { widthMm } = pageDimensionsMm(layoutSettings);
-    const frac = bleed / Math.max(1e-6, widthMm);
-    // box-shadow se aplica sobre la hoja física (antes del scale)
-    return `box-shadow:0 0 0 max(1px,calc(var(--page-phys-w) * ${frac})) rgba(255, 130, 70, 0.38);`;
-  });
-
-  let contentBoxStyle = $derived.by(() => {
-    if (!activePage) return '';
-    return buildPreviewContentBoxStyle(layoutSettings, activePage.side);
-  });
-
-  let safeGuideStyle = $derived.by(() => buildPreviewSafeAreaStyle(layoutSettings));
-
-  let bodyPaddingStyle = $derived.by(() => {
-    if (!activePage) return '';
-    return buildPreviewBodyPaddingStyle(layoutSettings, activePage.side);
-  });
-
-  function assetUrlFor(assetId: string | null | undefined): string | null {
-    if (!assetId) return null;
-    const a = assets.find(x => x.id === assetId);
-    return a ? assetDisplayUrl(bookId, a.storagePath) : null;
-  }
-
-  function bodyText(pl: PlacedBlock): string {
-    return pl.textOverride ?? pl.block?.contentText ?? '';
-  }
-
-  function textStyleForPlacement(page: RenderedPage, pl: PlacedBlock): string {
-    if (!pl.block) return '';
-    const resolved = resolveEffectiveBookStyleForBlock(
-      layoutSettings,
-      page.primarySectionType ? { sectionType: page.primarySectionType } : null,
-      pl.block,
-    );
-    if (!resolved) return '';
-    const style = { ...resolved };
-    if (pl.debugMeta?.continuedFromPreviousPage) {
-      style.marginTop = 0;
-    }
-    if (pl.debugMeta?.continuesOnNextPage) {
-      style.marginBottom = 0;
-    }
-    return buildBookStyleCss(style);
-  }
-
-  function textStyleDebugForPlacement(page: RenderedPage, pl: PlacedBlock): string | null {
-    if (!pl.block) return null;
-    const info = resolveEffectiveBookStyleInfoForBlock(
-      layoutSettings,
-      page.primarySectionType ? { sectionType: page.primarySectionType } : null,
-      pl.block,
-    );
-    if (!info) return null;
+    const bleedMm = Math.max(0, layoutSettings.bleedMm ?? 0);
     return [
-      `rol=${info.role}`,
-      `base=${info.baseStyle.fontSize}/${info.baseStyle.lineHeight}/${info.baseStyle.textAlign}`,
-      `override=${info.blockLayout.textAlign ?? '-'}|${info.blockLayout.widthMode ?? '-'}|${info.blockLayout.emphasis ?? '-'}`,
-      `final=${info.finalStyle.fontSize}/${info.finalStyle.lineHeight}/${info.finalStyle.textAlign}`,
-    ].join(' · ');
-  }
-
-  function chapterOpeningTextStyle(
-    style: BookStyleDefinition,
-    textAlign: 'left' | 'center' | 'right',
-  ): string {
-    return buildBookStyleCss({ ...style, textAlign }, { includeMargins: false });
-  }
-
-  function isFullPageImage(page: RenderedPage, pl: PlacedBlock): boolean {
-    if (pl.block?.blockType !== 'IMAGE') return false;
-    const img = parseImageBlockContent(pl.block.contentJson);
-    return page.primarySectionType === 'COVER' || img.fillPage;
-  }
-
-  function pageUsesFullPageImage(page: RenderedPage): boolean {
-    return page.placements.some(pl => isFullPageImage(page, pl));
-  }
+      `--page-phys-w:${physWidthPx}px`,
+      `--page-phys-h:${physHeightPx}px`,
+      `--zoom:${zoom}`,
+      `--page-w:${Math.round(physWidthPx * zoom)}px`,
+      `--page-h:${Math.round(physHeightPx * zoom)}px`,
+      `--bleed-outline:${showGuides && bleedMm > 0 ? `${bleedMm}mm` : '0'}`,
+    ].join(';');
+  });
 
   function firstEditableBlockId(page: RenderedPage): string | null {
     return page.placements.find(pl => pl.block?.id)?.block?.id ?? null;
@@ -226,6 +121,14 @@
               <a class="btn-mini btn-mini--jump" href={contentHrefForPage(activePage) ?? '#'}>Contenido</a>
             {/if}
 
+            <button
+              type="button"
+              class="btn-mini btn-mini--toggle"
+              aria-pressed={showGuides}
+              title="Mostrar caja de texto, zona segura y sangrado (no se imprimen)"
+              onclick={() => { showGuides = !showGuides; }}
+            >Guías</button>
+
             <!-- Controles de zoom -->
             <div class="zoom-controls" title="Zoom de visualización (no afecta la paginación)">
               <button type="button" class="btn-mini btn-mini--zoom" disabled={zoom <= ZOOM_MIN} onclick={zoomOut} title="Reducir zoom">−</button>
@@ -250,175 +153,21 @@
 
         <!-- Wrapper que ocupa el espacio DOM escalado -->
         <div class="page-sheet-wrap">
-        <article
-          class="page-sheet"
-          class:page-sheet--left={activePage.side === 'left'}
-          class:page-sheet--right={activePage.side === 'right'}
-          class:page-sheet--blank={activePage.kind === 'editorial_blank'}
-          class:page-sheet--cover={pageUsesFullPageImage(activePage)}
-          style={`${pageSheetExtraStyle}`}
-        >
-          <div class="page-content-box" style={contentBoxStyle}>
-          <div class="page-safe-guide" style={safeGuideStyle} aria-hidden="true"></div>
+          <div class="page-sheet" class:page-sheet--bleed={showGuides}>
+            <BookPage {bookId} {layout} page={activePage} {assets} mode="preview" {showGuides} />
+          </div>
+        </div>
 
-          {#if activePage.editorial.headerText && !pageUsesFullPageImage(activePage)}
-            <div class="page-header">
-              <span>{activePage.editorial.headerText}</span>
-            </div>
-          {/if}
-
-          <header class="page-rail" class:page-rail--hidden={pageUsesFullPageImage(activePage)}>
-            {#if activePage.primarySectionType}
-              <span class="rail-type">{sectionTypeLabel(activePage.primarySectionType)}</span>
-              {#if activePage.primarySectionTitle}
-                <span class="rail-title">{activePage.primarySectionTitle}</span>
-              {/if}
-            {:else if activePage.kind === 'editorial_blank'}
-              <span class="rail-type rail-type--muted">Blanco editorial</span>
-            {/if}
-          </header>
-
-          <div
-            class="page-body"
-            class:page-body--cover={pageUsesFullPageImage(activePage)}
-            style={pageUsesFullPageImage(activePage) ? '' : bodyPaddingStyle}
-          >
-            {#if activePage.kind === 'editorial_blank'}
-              <div class="blank-mark" aria-hidden="true"></div>
-              <p class="blank-label">Página en blanco editorial</p>
-              <p class="blank-hint">Forzada por reglas de inicio en recto u otras reglas v1.</p>
-            {:else}
-              {#each activePage.placements as pl, pi (`${pl.block?.id ?? pl.syntheticType ?? 'synthetic'}-${pi}-${pl.textOverride ?? ''}`)}
-                <div
-                  class="flow-block flow-block--{pl.block?.blockType ?? pl.syntheticType ?? 'SYNTHETIC'}"
-                  data-style-debug={textStyleDebugForPlacement(activePage, pl) ?? undefined}
-                  title={textStyleDebugForPlacement(activePage, pl) ?? undefined}
-                >
-                  {#if pl.syntheticType === 'TOC'}
-                    <section class="toc-render">
-                      {#if pl.tocConfig?.showTitle}
-                        <h2 class="toc-render__title" style={buildBookStyleCss(bookStyles.HEADING_1)}>{pl.tocConfig.titleText}</h2>
-                      {/if}
-                      {#if pl.tocEntries && pl.tocEntries.length > 0}
-                        <div class="toc-render__list">
-                          {#each pl.tocEntries as entry (`${entry.targetSectionId}-${entry.orderIndex}`)}
-                            <div class="toc-render__row" style={buildBookStyleCss(bookStyles.TOC_ENTRY, { includeMargins: false, includeMaxWidth: false })}>
-                              <span class="toc-render__label">{entry.label}</span>
-                              {#if pl.tocConfig?.showDotLeaders}
-                                <span class="toc-render__dots" aria-hidden="true"></span>
-                              {/if}
-                              <span class="toc-render__page">{entry.pageNumberVisible ?? '—'}</span>
-                            </div>
-                          {/each}
-                        </div>
-                      {:else}
-                        <p class="toc-render__empty">Todavía no hay entradas para mostrar.</p>
-                      {/if}
-                    </section>
-                  {:else if pl.block?.blockType === 'CHAPTER_OPENING'}
-                    {@const co = parseChapterOpeningContent(pl.block.contentJson)}
-                    <div class="co-render {chapterOpeningPreviewRootClassNames(co)}">
-                      {#if co.assetId}
-                        {@const u = assetUrlFor(co.assetId)}
-                        {#if u}
-                          <img class="co-render__img" src={u} alt="" />
-                        {:else}
-                          <div class="co-render__ph">Imagen no disponible</div>
-                        {/if}
-                      {:else}
-                        <div class="co-render__ph">Sin imagen</div>
-                      {/if}
-                      <div class="co-render__text">
-                        {#if co.chapterLabel.trim()}
-                          <span class="co-render__lab" style={chapterOpeningTextStyle(bookStyles.CHAPTER_OPENING_LABEL, co.textAlign)}>{co.chapterLabel}</span>
-                        {/if}
-                        {#if co.title.trim()}
-                          <span class="co-render__tit" style={chapterOpeningTextStyle(bookStyles.CHAPTER_OPENING_TITLE, co.textAlign)}>{co.title}</span>
-                        {/if}
-                      </div>
-                    </div>
-                  {:else if pl.block?.blockType === 'TITLE_PAGE'}
-                    {@const tp = parseTitlePageContent(pl.block.contentJson)}
-                    <div class="tp-render" style="text-align:{tp.textAlign}">
-                      {#if tp.seriesLabel.trim()}
-                        <div class="tp-render__series" style={buildBookStyleCss(bookStyles.HEADING_4, { includeMargins: false })}>{tp.seriesLabel}</div>
-                      {/if}
-                      <div class="tp-render__title-area">
-                        {#if tp.title.trim()}
-                          <div class="tp-render__title" style={buildBookStyleCss(bookStyles.TITLE, { includeMargins: false })}>{tp.title}</div>
-                        {/if}
-                        {#if tp.subtitle.trim()}
-                          <div class="tp-render__subtitle" style={buildBookStyleCss(bookStyles.HEADING_2, { includeMargins: false })}>{tp.subtitle}</div>
-                        {/if}
-                      </div>
-                      {#if tp.authorLine.trim()}
-                        <div class="tp-render__author" style={buildBookStyleCss(bookStyles.CENTERED_PHRASE, { includeMargins: false, includeMaxWidth: false })}>{tp.authorLine}</div>
-                      {/if}
-                      {#if tp.publisherInfo.trim()}
-                        <div class="tp-render__publisher" style={buildBookStyleCss(bookStyles.PARAGRAPH, { includeMargins: false })}>{tp.publisherInfo}</div>
-                      {/if}
-                    </div>
-                  {:else if pl.block?.blockType === 'IMAGE'}
-                    {@const im = parseImageBlockContent(pl.block.contentJson)}
-                    {@const u = assetUrlFor(im.assetId)}
-                    <figure class="img-render" class:img-render--cover={isFullPageImage(activePage, pl)}>
-                      {#if u}
-                        <img src={u} alt={im.altText || ''} />
-                        {#if isFullPageImage(activePage, pl)}
-                          <div class="img-safe-zone" aria-hidden="true">
-                            <div class="img-safe-zone__frame"></div>
-                            <span class="img-safe-zone__label">Zona segura</span>
-                          </div>
-                        {/if}
-                      {:else}
-                        <div class="img-ph">Sin recurso</div>
-                      {/if}
-                      {#if im.caption.trim() && !isFullPageImage(activePage, pl)}
-                        <figcaption>{im.caption}</figcaption>
-                      {/if}
-                    </figure>
-                  {:else if pl.block?.blockType === 'HEADING_1'}
-                    <h1 class="flow-h1" style={textStyleForPlacement(activePage, pl)}>{bodyText(pl)}</h1>
-                  {:else if pl.block?.blockType === 'HEADING_2'}
-                    <h2 class="flow-h2" style={textStyleForPlacement(activePage, pl)}>{bodyText(pl)}</h2>
-                  {:else if pl.block?.blockType === 'QUOTE'}
-                    <blockquote class="flow-quote" style={textStyleForPlacement(activePage, pl)}>{bodyText(pl)}</blockquote>
-                  {:else if pl.block?.blockType === 'SEPARATOR'}
-                    <hr class="flow-sep" />
-                  {:else if pl.block?.blockType === 'CENTERED_PHRASE'}
-                    <p class="flow-center" style={textStyleForPlacement(activePage, pl)}>{bodyText(pl)}</p>
-                  {:else}
-                    <p class="flow-p" style={textStyleForPlacement(activePage, pl)}>{bodyText(pl)}</p>
-                  {/if}
-                </div>
+        {#if showLayoutDebug && activePage.debugNotes.length > 0}
+          <details class="page-debug">
+            <summary>Notas de maquetación</summary>
+            <ul>
+              {#each activePage.debugNotes as n}
+                <li>{n}</li>
               {/each}
-            {/if}
-          </div>
-
-          <footer class="page-footer" class:page-footer--hidden={pageUsesFullPageImage(activePage)}>
-            <span class="folio">Folio físico {activePage.physicalPageNumber}</span>
-            {#if activePage.editorial.footerText}
-              <span class="folio-ed">{activePage.editorial.footerText}</span>
-            {:else if activePage.editorial.numberingScope}
-              <span class="folio-ed folio-ed--muted">Número oculto en esta página</span>
-            {:else}
-              <span class="folio-ed folio-ed--muted">Numeración editorial: pendiente</span>
-            {/if}
-          </footer>
-
-          {#if showLayoutDebug && activePage.debugNotes.length > 0}
-            <details class="page-debug">
-              <summary>Notas de maquetación v1</summary>
-              <ul>
-                {#each activePage.debugNotes as n}
-                  <li>{n}</li>
-                {/each}
-              </ul>
-            </details>
-          {/if}
-          </div>
-        </article>
-        </div><!-- /page-sheet-wrap -->
+            </ul>
+          </details>
+        {/if}
       {/if}
     </div>
   {/if}
@@ -608,452 +357,44 @@
     color: #fff;
   }
 
-  /* Wrapper que reserva el espacio DOM exacto del contenido escalado */
+  /* Wrapper que reserva el espacio DOM exacto de la hoja escalada */
   .page-sheet-wrap {
     width: var(--page-w);
     height: var(--page-h);
     flex-shrink: 0;
-    overflow: hidden;
     margin: 0 auto;
   }
-
   .page-sheet {
-    /* Dimensiones físicas reales (96 dpi, antes del zoom) */
     width: var(--page-phys-w);
     height: var(--page-phys-h);
-    min-height: var(--page-phys-h);
-    max-height: var(--page-phys-h);
-    /* Escalar hacia el tamaño visual deseado */
     transform: scale(var(--zoom));
     transform-origin: top left;
-    background: #d8d8d4;
-    color: #1a1a22;
-    border-radius: 3px;
     box-shadow:
       0 2px 4px rgba(0, 0, 0, 0.12),
-      0 12px 28px rgba(0, 0, 0, 0.18);
-    display: block;
-    position: relative;
-    overflow: hidden;
-  }
-
-  .page-content-box {
-    position: absolute;
-    background: #fafaf8;
-    border-radius: 1px;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    z-index: 1;
-  }
-
-  .page-safe-guide {
-    position: absolute;
-    z-index: 3;
-    pointer-events: none;
-    border: 1px dashed rgba(80, 140, 220, 0.45);
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
-    border-radius: 1px;
-  }
-  .page-sheet--right {
-    box-shadow:
-      2px 2px 4px rgba(0, 0, 0, 0.1),
-      10px 12px 28px rgba(0, 0, 0, 0.16);
-  }
-  .page-sheet--left {
-    box-shadow:
-      -2px 2px 4px rgba(0, 0, 0, 0.1),
-      -10px 12px 28px rgba(0, 0, 0, 0.16);
-  }
-  .page-sheet--blank {
-    background: linear-gradient(145deg, #f2f2f0 0%, #e8e8e4 100%);
-  }
-  .page-sheet--cover {
-    overflow: hidden;
-  }
-
-  .page-rail {
-    padding: 10px 14px 6px;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .page-rail--hidden {
-    display: none;
-  }
-  .page-header {
-    padding: 10px 22px 0;
-    text-align: center;
-    font-size: 10px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: rgba(0, 0, 0, 0.44);
-  }
-  .rail-type {
-    font-size: 9px;
-    font-weight: 800;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: rgba(0, 0, 0, 0.38);
-  }
-  .rail-type--muted {
-    color: rgba(0, 0, 0, 0.28);
-  }
-  .rail-title {
-    font-size: 11px;
-    color: rgba(0, 0, 0, 0.45);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .page-body {
-    flex: 1;
-    /* No se fija font-family aquí: cada bloque recibe su font-family
-       via inline style de buildBookStyleCss(). El body hereda la fuente
-       del documento (Georgia del reset global), y los bloques sin fontFamily
-       explícito la heredan correctamente. */
-    font-size: 13px;
-    line-height: 1.55;
-    min-height: 0;
-  }
-  .page-body--cover {
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .blank-mark {
-    position: absolute;
-    inset: 36% 30%;
-    border: 1px dashed rgba(0, 0, 0, 0.12);
-    border-radius: 4px;
-    pointer-events: none;
-  }
-  .blank-label {
-    text-align: center;
-    font-size: 13px;
-    font-weight: 600;
-    color: rgba(0, 0, 0, 0.35);
-    margin: 28% 0 0;
-  }
-  .blank-hint {
-    text-align: center;
-    font-size: 11px;
-    color: rgba(0, 0, 0, 0.28);
-    margin: 8px 0 0;
-  }
-
-  .flow-block {
-    margin: 0;
-  }
-  .flow-block--CHAPTER_OPENING {
-    margin: calc(-1 * var(--flow-pull-y, 2.6%)) calc(-1 * var(--flow-pull-x, 5.6%)) 12px
-      calc(-1 * var(--flow-pull-x, 5.6%));
-  }
-
-  .flow-h1 {
-    font-size: 1.45rem;
-    font-weight: 700;
-    margin: 0 0 0.5em;
-    line-height: 1.2;
-    overflow-wrap: normal;
-    word-break: normal;
-    hyphens: none;
-    white-space: pre-wrap;
-  }
-  .flow-h2 {
-    font-size: 1.15rem;
-    font-weight: 700;
-    margin: 0.6em 0 0.35em;
-    line-height: 1.25;
-    overflow-wrap: normal;
-    word-break: normal;
-    hyphens: none;
-    white-space: pre-wrap;
-  }
-  .flow-p {
-    margin: 0 0 0.75em;
-    overflow-wrap: normal;
-    word-break: normal;
-    hyphens: none;
-    white-space: pre-wrap;
-  }
-  .flow-quote {
-    margin: 0.6em 0;
-    padding: 0.5em 0 0.5em 0.9em;
-    border-left: 3px solid rgba(0, 0, 0, 0.15);
-    color: rgba(0, 0, 0, 0.72);
-    overflow-wrap: normal;
-    word-break: normal;
-    hyphens: none;
-    white-space: pre-wrap;
-  }
-  .flow-center {
-    text-align: center;
-    font-style: italic;
-    margin: 0.8em 0;
-    overflow-wrap: normal;
-    word-break: normal;
-    hyphens: none;
-    white-space: pre-wrap;
-  }
-  .flow-sep {
-    border: none;
-    border-top: 1px solid rgba(0, 0, 0, 0.12);
-    margin: 1em 0;
-  }
-
-  .toc-render {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin: 0.4em 0 0.8em;
-  }
-  .toc-render__title {
-    margin: 0 0 0.3em;
-    font-size: 1.2rem;
-    font-weight: 700;
-    text-align: center;
-  }
-  .toc-render__list {
-    display: flex;
-    flex-direction: column;
-    gap: 7px;
-  }
-  .toc-render__row {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    font-size: 13px;
-    line-height: 1.35;
-  }
-  .toc-render__label {
-    min-width: 0;
-  }
-  .toc-render__dots {
-    flex: 1;
-    border-bottom: 1px dotted rgba(0, 0, 0, 0.35);
-    transform: translateY(-2px);
-  }
-  .toc-render__page {
-    min-width: 1.8rem;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
-  .toc-render__empty {
-    margin: 0;
-    font-size: 12px;
-    color: rgba(0, 0, 0, 0.42);
-    font-style: italic;
-  }
-
-  .img-render {
-    margin: 0.5em 0;
-  }
-  .img-render--cover {
-    margin: 0;
-    width: 100%;
-    height: 100%;
-    min-height: 100%;
-    position: relative;
-  }
-  .img-render img {
-    display: block;
-    max-width: 100%;
-    max-height: 220px;
-    object-fit: contain;
-    margin: 0 auto;
-  }
-  .img-render--cover img {
-    width: 100%;
-    height: 100%;
-    max-width: none;
-    max-height: none;
-    object-fit: cover;
-    margin: 0;
-  }
-  .img-ph {
-    min-height: 100px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(0, 0, 0, 0.05);
-    color: rgba(0, 0, 0, 0.35);
-    font-size: 12px;
-  }
-  .img-safe-zone {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-  }
-  .img-safe-zone__frame {
-    position: absolute;
-    inset: 8%;
-    border: 1.5px dashed rgba(255, 255, 255, 0.78);
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
+      0 12px 28px rgba(0, 0, 0, 0.22);
     border-radius: 2px;
   }
-  .img-safe-zone__label {
-    position: absolute;
-    top: calc(8% - 10px);
-    right: 8%;
-    transform: translateY(-100%);
-    padding: 3px 7px;
-    border-radius: 999px;
-    background: rgba(0, 0, 0, 0.54);
-    color: rgba(255, 255, 255, 0.92);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
-  .img-render figcaption {
-    font-size: 11px;
-    color: rgba(0, 0, 0, 0.5);
-    margin-top: 6px;
-    text-align: center;
+  .page-sheet--bleed {
+    outline: var(--bleed-outline, 0) solid rgba(255, 130, 70, 0.35);
   }
 
-  /* ── TITLE_PAGE render ─────────────────────────────────────────────── */
-  .tp-render {
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-    height: 100%;
-    min-height: inherit;
-    padding: 0;
-  }
-  .tp-render__series {
-    padding-top: 18%;
-    opacity: 0.7;
-  }
-  .tp-render__title-area {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    padding: 4% 0;
-    gap: 0.4em;
-  }
-  .tp-render__title   { line-height: 1.15; }
-  .tp-render__subtitle{ opacity: 0.8; }
-  .tp-render__author  { padding-bottom: 6%; }
-  .tp-render__publisher {
-    margin-top: auto;
-    padding-bottom: 8%;
-    opacity: 0.55;
-  }
-
-  .co-render {
-    position: relative;
-    min-height: 200px;
-    background: #222;
-    color: #fff;
-  }
-  .co-render__img {
-    display: block;
-    width: 100%;
-    max-height: 280px;
-    object-fit: cover;
-  }
-  .co-render__ph {
-    min-height: 200px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #2a2a32;
-    color: rgba(255, 255, 255, 0.35);
+  .btn-mini--toggle {
+    width: auto;
+    padding: 0 10px;
     font-size: 12px;
   }
-  .co-render__text {
-    position: absolute;
-    z-index: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 14px 16px;
-    max-width: 88%;
-  }
-  .co-render.co-preview--pos-top-left .co-render__text { top: 8px; left: 8px; }
-  .co-render.co-preview--pos-top-right .co-render__text { top: 8px; right: 8px; align-items: flex-end; }
-  .co-render.co-preview--pos-bottom-left .co-render__text { bottom: 8px; left: 8px; }
-  .co-render.co-preview--pos-bottom-right .co-render__text { bottom: 8px; right: 8px; align-items: flex-end; }
-  .co-render.co-preview--pos-center .co-render__text {
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    align-items: center;
-    text-align: center;
-  }
-  .co-render.co-preview--ta-left .co-render__text { text-align: left; }
-  .co-render.co-preview--ta-center .co-render__text { text-align: center; }
-  .co-render.co-preview--ta-right .co-render__text { text-align: right; }
-  .co-render.co-preview--overlay::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    pointer-events: none;
-    background: linear-gradient(to top, rgba(0, 0, 0, 0.55), transparent 50%);
-  }
-  .co-render.co-preview--tone-light .co-render__lab,
-  .co-render.co-preview--tone-light .co-render__tit,
-  .co-render.co-preview--tone-auto .co-render__lab,
-  .co-render.co-preview--tone-auto .co-render__tit {
-    color: rgba(255, 255, 255, 0.95);
-    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
-  }
-  .co-render.co-preview--tone-dark .co-render__lab,
-  .co-render.co-preview--tone-dark .co-render__tit {
-    color: rgba(20, 20, 28, 0.95);
-    text-shadow: 0 0 6px rgba(255, 255, 255, 0.35);
-  }
-  .co-render__lab {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-  .co-render__tit {
-    font-size: 1.35rem;
-    font-weight: 700;
-    line-height: 1.15;
-  }
-
-  .page-footer {
-    margin-top: auto;
-    padding: 10px 16px 12px;
-    border-top: 1px solid rgba(0, 0, 0, 0.07);
-    display: flex;
-    justify-content: space-between;
-    gap: 10px;
-    flex-wrap: wrap;
-    font-size: 10px;
-    color: rgba(0, 0, 0, 0.38);
-  }
-  .page-footer--hidden {
-    display: none;
-  }
-  .folio {
-    font-variant-numeric: tabular-nums;
-  }
-  .folio-ed--muted {
-    opacity: 0.75;
+  .btn-mini--toggle[aria-pressed='true'] {
+    border-color: rgba(122, 184, 232, 0.6);
+    background: rgba(122, 184, 232, 0.18);
+    color: #e8f4ff;
   }
 
   .page-debug {
-    font-size: 10px;
-    color: rgba(0, 0, 0, 0.45);
-    padding: 0 14px 10px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    max-width: var(--page-w);
+    margin: 0 auto;
   }
-  .page-debug summary {
-    cursor: pointer;
-    user-select: none;
-  }
-  .page-debug ul {
-    margin: 6px 0 0;
-    padding-left: 1.1em;
-  }
+  .page-debug summary { cursor: pointer; user-select: none; }
+  .page-debug ul { margin: 6px 0 0; padding-left: 1.1em; }
 </style>

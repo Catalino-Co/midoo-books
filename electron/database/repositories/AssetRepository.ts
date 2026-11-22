@@ -26,8 +26,9 @@ export function createAsset(input: CreateAssetInput): Asset {
     `INSERT INTO assets
        (id, book_id, asset_type, filename, original_name, mime_type, file_ext,
         file_size_bytes, width_px, height_px, storage_path, checksum, alt_text, caption,
+        font_family, font_weight, font_style,
         created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.bookId,
@@ -43,6 +44,9 @@ export function createAsset(input: CreateAssetInput): Asset {
       input.checksum,
       input.altText ?? '',
       caption,
+      input.fontFamily ?? null,
+      input.fontWeight ?? null,
+      input.fontStyle ?? null,
       ts,
       ts,
     ],
@@ -78,6 +82,18 @@ export function updateAsset(id: string, input: UpdateAssetInput): Asset | null {
   if (input.altText !== undefined)   { fields.push('alt_text = ?');   values.push(input.altText); }
   if (input.caption !== undefined)   { fields.push('caption = ?');    values.push(input.caption); }
   if (input.assetType !== undefined) { fields.push('asset_type = ?'); values.push(input.assetType); }
+  if (input.fontFamily !== undefined) {
+    const fam = input.fontFamily?.trim() || null;
+    fields.push('font_family = ?'); values.push(fam);
+  }
+  if (input.fontWeight !== undefined) {
+    const w = input.fontWeight == null ? null : Math.min(900, Math.max(100, Math.round(input.fontWeight / 100) * 100));
+    fields.push('font_weight = ?'); values.push(w);
+  }
+  if (input.fontStyle !== undefined) {
+    const st = input.fontStyle === 'italic' ? 'italic' : input.fontStyle === 'normal' ? 'normal' : null;
+    fields.push('font_style = ?'); values.push(st);
+  }
 
   if (fields.length === 0) return existing;
 

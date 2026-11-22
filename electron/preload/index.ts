@@ -72,7 +72,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getById:       (id)                     => ipcRenderer.invoke('assets:getById', id),
     update:        (id, input)              => ipcRenderer.invoke('assets:update', id, input),
     delete:        (id)                     => ipcRenderer.invoke('assets:delete', id),
-    pickAndImport: (bookId)                 => ipcRenderer.invoke('assets:pickAndImport', bookId),
+    pickAndImport: (bookId, kind)           => ipcRenderer.invoke('assets:pickAndImport', bookId, kind ?? 'image'),
     importPaths:   (bookId, paths)          => ipcRenderer.invoke('assets:importPaths', bookId, paths),
   },
 

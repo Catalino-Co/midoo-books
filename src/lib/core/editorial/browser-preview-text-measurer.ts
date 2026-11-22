@@ -8,19 +8,18 @@ import type {
   MeasuredParagraphSplit,
   MeasuredTextBlock,
 } from './page-layout-engine';
+import {
+  DEFAULT_BOOK_FONT_STACK,
+  imageCaptionCss,
+  textBlockCss,
+  textBlockTag,
+} from './block-render-css';
 
 const PT_TO_PX = 96 / 72;
-const SPLIT_FIT_TOLERANCE_PX = 2;
+/** Sin holgura: el medidor usa el mismo CSS y ancho que el render. */
+const SPLIT_FIT_TOLERANCE_PX = 0;
 /** Umbral para agrupar rectángulos en la misma línea visual (subpíxeles / zoom). */
 const LINE_TOP_EPSILON_PX = 1;
-
-function marginTopPx(style: BookStyleDefinition, continuedFromPreviousPage: boolean): number {
-  return continuedFromPreviousPage ? 0 : style.marginTop * PT_TO_PX;
-}
-
-function marginBottomPx(style: BookStyleDefinition, continuesOnNextPage: boolean): number {
-  return continuesOnNextPage ? 0 : style.marginBottom * PT_TO_PX;
-}
 
 function lineHeightPx(style: BookStyleDefinition): number {
   return Math.max(1, style.fontSize * PT_TO_PX * style.lineHeight);
@@ -30,14 +29,24 @@ export class BrowserPreviewTextMeasurer implements LayoutTextMeasurementAdapter 
   private readonly host: HTMLDivElement;
   private readonly bodyWidthPx: number;
 
-  constructor(metrics: LayoutEngineMetrics) {
-    this.bodyWidthPx = Math.max(180, metrics.pageBodyWidthUnits);
+  /**
+   * @param metrics         métricas del motor; si traen `contentWidthMm` el ancho de
+   *                        medición es exactamente el de la caja de texto en mm.
+   * @param baseFontFamily  familia base del libro (la heredan estilos con fontFamily null),
+   *                        igual que en BookPage.svelte.
+   */
+  constructor(metrics: LayoutEngineMetrics, baseFontFamily: string = DEFAULT_BOOK_FONT_STACK) {
+    this.bodyWidthPx = Math.max(60, metrics.pageBodyWidthUnits);
     this.host = document.createElement('div');
     this.host.setAttribute('aria-hidden', 'true');
     this.host.style.position = 'fixed';
     this.host.style.left = '-10000px';
     this.host.style.top = '0';
-    this.host.style.width = `${this.bodyWidthPx}px`;
+    this.host.style.width = metrics.contentWidthMm != null
+      ? `${metrics.contentWidthMm}mm`
+      : `${this.bodyWidthPx}px`;
+    this.host.style.fontFamily = baseFontFamily;
+    this.host.style.color = '#111';
     this.host.style.visibility = 'hidden';
     this.host.style.pointerEvents = 'none';
     this.host.style.contain = 'layout style paint';
@@ -311,33 +320,13 @@ export class BrowserPreviewTextMeasurer implements LayoutTextMeasurementAdapter 
     this.host.innerHTML = '';
     const element = document.createElement('p');
     element.textContent = text;
-    element.style.margin = '0';
-    element.style.padding = '0';
-    element.style.border = 'none';
-    element.style.boxSizing = 'border-box';
-    element.style.width = '100%';
-    element.style.whiteSpace = 'pre-wrap';
-    element.style.overflowWrap = 'normal';
-    element.style.wordBreak = 'normal';
-    element.style.hyphens = 'none';
-    element.style.fontFamily = "'Georgia', 'Times New Roman', serif";
-    element.style.fontSize = `${style.fontSize}pt`;
-    element.style.lineHeight = String(style.lineHeight);
-    element.style.textAlign = style.textAlign;
-    element.style.fontWeight = String(style.fontWeight);
-    element.style.letterSpacing = `${style.letterSpacing}em`;
-    if (style.color) element.style.color = style.color;
-    if (style.maxWidth != null) {
-      element.style.maxWidth = `${style.maxWidth}%`;
-      if (style.textAlign === 'right') {
-        element.style.marginInline = 'auto 0';
-      } else if (style.textAlign === 'left') {
-        element.style.marginInline = '0 auto';
-      } else {
-        element.style.marginInline = 'auto';
-      }
-    }
-
+    element.style.cssText = textBlockCss('PARAGRAPH', style, {
+      continuedFromPreviousPage,
+      continuesOnNextPage,
+    });
+    // Los márgenes se suman aparte (measureElement); aquí solo interesan las líneas.
+    element.style.marginTop = '0';
+    element.style.marginBottom = '0';
     this.host.appendChild(element);
     void element.offsetHeight;
     return element;
@@ -355,53 +344,24 @@ export class BrowserPreviewTextMeasurer implements LayoutTextMeasurementAdapter 
   } {
     this.host.innerHTML = '';
 
+    // Envoltorio flow-root, igual que en BookPage.svelte: los márgenes del bloque
+    // quedan dentro de su caja y no colapsan con los vecinos → alturas sumables.
+    const wrapper = document.createElement('div');
+    wrapper.style.display = 'flow-root';
     const element = document.createElement(this.tagNameForBlock(blockType));
     element.textContent = text;
-    element.style.margin = '0';
-    element.style.padding = '0';
-    element.style.border = 'none';
-    element.style.boxSizing = 'border-box';
-    element.style.width = '100%';
-    element.style.whiteSpace = 'pre-wrap';
-    element.style.overflowWrap = 'normal';
-    element.style.wordBreak = 'normal';
-    element.style.hyphens = 'none';
-    element.style.fontFamily = "'Georgia', 'Times New Roman', serif";
-    element.style.fontSize = `${style.fontSize}pt`;
-    element.style.lineHeight = String(style.lineHeight);
-    element.style.textAlign = style.textAlign;
-    element.style.fontWeight = String(style.fontWeight);
-    element.style.letterSpacing = `${style.letterSpacing}em`;
-    if (style.color) element.style.color = style.color;
-    if (style.maxWidth != null) {
-      element.style.maxWidth = `${style.maxWidth}%`;
-      if (style.textAlign === 'right') {
-        element.style.marginInline = 'auto 0';
-      } else if (style.textAlign === 'left') {
-        element.style.marginInline = '0 auto';
-      } else {
-        element.style.marginInline = 'auto';
-      }
-    }
+    element.style.cssText = textBlockCss(blockType, style, {
+      continuedFromPreviousPage,
+      continuesOnNextPage,
+    });
+    wrapper.appendChild(element);
+    this.host.appendChild(wrapper);
+    void wrapper.offsetHeight;
 
-    let verticalPaddingPx = 0;
-    if (blockType === 'QUOTE') {
-      const padBlock = style.fontSize * PT_TO_PX * 0.5;
-      const padInline = style.fontSize * PT_TO_PX * 0.9;
-      verticalPaddingPx = padBlock * 2;
-      element.style.padding = `${padBlock}px 0 ${padBlock}px ${padInline}px`;
-      element.style.borderLeft = '3px solid transparent';
-    } else if (blockType === 'CENTERED_PHRASE') {
-      element.style.fontStyle = 'italic';
-    }
-
-    this.host.appendChild(element);
-    void element.offsetHeight;
-
+    const totalHeightPx = wrapper.getBoundingClientRect().height;
+    const cs = getComputedStyle(element);
+    const verticalPaddingPx = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
     const contentHeight = element.getBoundingClientRect().height;
-    const totalHeightPx = contentHeight
-      + marginTopPx(style, continuedFromPreviousPage)
-      + marginBottomPx(style, continuesOnNextPage);
 
     const lineCount = Math.max(
       1,
@@ -414,12 +374,20 @@ export class BrowserPreviewTextMeasurer implements LayoutTextMeasurementAdapter 
     };
   }
 
-  private tagNameForBlock(blockType: DocumentBlock['blockType']): 'p' | 'h1' | 'h2' | 'blockquote' {
-    switch (blockType) {
-      case 'HEADING_1': return 'h1';
-      case 'HEADING_2': return 'h2';
-      case 'QUOTE': return 'blockquote';
-      default: return 'p';
-    }
+  /** Alto (px) de un pie de imagen con el CSS compartido. */
+  measureCaption(text: string): number {
+    this.host.innerHTML = '';
+    const wrapper = document.createElement('div');
+    wrapper.style.display = 'flow-root';
+    const el = document.createElement('figcaption');
+    el.textContent = text;
+    el.style.cssText = imageCaptionCss();
+    wrapper.appendChild(el);
+    this.host.appendChild(wrapper);
+    return Math.ceil(wrapper.getBoundingClientRect().height);
+  }
+
+  private tagNameForBlock(blockType: DocumentBlock['blockType']): ReturnType<typeof textBlockTag> {
+    return textBlockTag(blockType);
   }
 }
