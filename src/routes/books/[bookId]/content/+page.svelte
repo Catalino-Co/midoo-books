@@ -63,6 +63,9 @@
     chapterOpeningTextPositionLabel,
     chapterOpeningTextAlignLabel,
     chapterOpeningTextColorModeLabel,
+    chapterOpeningStartOnLabel,
+    CHAPTER_OPENING_START_ON_VALUES,
+    type ChapterOpeningStartOn,
     type ChapterOpeningTextPosition,
     type ChapterOpeningTextAlign,
     type ChapterOpeningTextColorMode,
@@ -90,6 +93,14 @@
     type ResolvedBookStyleInfo,
   } from '$lib/services/styles.service';
   import { resolveBookStyleRoleForBlock } from '$lib/core/editorial/book-styles';
+  import {
+    parseSeparatorContent,
+    serializeSeparatorContent,
+    separatorOrnamentLabel,
+    separatorOrnamentSvg,
+    SEPARATOR_ORNAMENTS,
+    type SeparatorOrnament,
+  } from '$lib/core/editorial/separator-content';
   import SectionTypeSelect from '$lib/components/SectionTypeSelect.svelte';
   import MarkdownImportUnifiedModal from '$lib/components/MarkdownImportUnifiedModal.svelte';
   import type {
@@ -606,6 +617,8 @@
   let insp_bImageCaption   = $state('');
   let insp_bImageFillPage  = $state(false);
   let insp_bImageWidthPercent = $state<number>(DEFAULT_IMAGE_WIDTH_PERCENT);
+  let insp_bImageBleed     = $state(false);
+  let insp_bSepOrnament    = $state<SeparatorOrnament>('line');
 
   let insp_bCoLabel          = $state('');
   let insp_bCoTitle          = $state('');
@@ -614,6 +627,8 @@
   let insp_bCoTextAlign      = $state<ChapterOpeningTextAlign>('left');
   let insp_bCoOverlay        = $state(true);
   let insp_bCoTextColorMode  = $state<ChapterOpeningTextColorMode>('light');
+  let insp_bCoBleed          = $state(true);
+  let insp_bCoStartOn        = $state<ChapterOpeningStartOn>('next');
 
   // ── Campos TITLE_PAGE ────────────────────────────────────────────────────
   let insp_bTpSeriesLabel    = $state('');
@@ -706,6 +721,8 @@
     insp_bCoTextAlign     = d.textAlign;
     insp_bCoOverlay       = d.overlay;
     insp_bCoTextColorMode = d.textColorMode;
+    insp_bCoBleed         = d.bleed;
+    insp_bCoStartOn       = d.startOn;
   }
 
   function resetTitlePageInspector() {
@@ -905,13 +922,18 @@
       insp_bImageCaption = img.caption;
       insp_bImageFillPage = img.fillPage;
       insp_bImageWidthPercent = img.widthPercent;
+      insp_bImageBleed = img.bleed;
     } else {
       insp_bImageAssetId = '';
       insp_bImageAlt     = '';
       insp_bImageCaption = '';
       insp_bImageFillPage = false;
       insp_bImageWidthPercent = DEFAULT_IMAGE_WIDTH_PERCENT;
+      insp_bImageBleed = false;
     }
+    insp_bSepOrnament = block.blockType === 'SEPARATOR'
+      ? parseSeparatorContent(block.contentJson).ornament
+      : 'line';
     if (block.blockType === 'CHAPTER_OPENING') {
       const co = parseChapterOpeningContent(block.contentJson);
       insp_bCoLabel         = co.chapterLabel;
@@ -921,6 +943,8 @@
       insp_bCoTextAlign     = co.textAlign;
       insp_bCoOverlay       = co.overlay;
       insp_bCoTextColorMode = co.textColorMode;
+      insp_bCoBleed         = co.bleed;
+      insp_bCoStartOn       = co.startOn;
     } else {
       resetChapterOpeningInspector();
     }
@@ -1032,6 +1056,7 @@
           caption: insp_bImageCaption,
           fillPage: insp_bImageFillPage,
           widthPercent: insp_bImageWidthPercent,
+          bleed: insp_bImageBleed,
         });
       } else if (insp_bType === 'CHAPTER_OPENING') {
         contentJsonPayload = serializeChapterOpeningContent({
@@ -1042,6 +1067,8 @@
           textAlign:    insp_bCoTextAlign,
           overlay:      insp_bCoOverlay,
           textColorMode: insp_bCoTextColorMode,
+          bleed:        insp_bCoBleed,
+          startOn:      insp_bCoStartOn,
         });
       } else if (insp_bType === 'TITLE_PAGE') {
         contentJsonPayload = serializeTitlePageContent({
@@ -1052,10 +1079,12 @@
           publisherInfo: insp_bTpPublisherInfo,
           textAlign:     insp_bTpTextAlign,
         });
+      } else if (insp_bType === 'SEPARATOR') {
+        contentJsonPayload = serializeSeparatorContent({ ornament: insp_bSepOrnament });
       } else if (
-        (prev?.blockType === 'IMAGE' && insp_bType !== 'IMAGE')
-        || (prev?.blockType === 'CHAPTER_OPENING' && insp_bType !== 'CHAPTER_OPENING')
-        || (prev?.blockType === 'TITLE_PAGE' && insp_bType !== 'TITLE_PAGE')
+        // El bloque cambió desde un tipo con content_json estructurado a uno sin él
+        // (aquí insp_bType ya no es ninguno de esos tipos): limpiar el JSON.
+        prev && (['IMAGE', 'CHAPTER_OPENING', 'TITLE_PAGE', 'SEPARATOR'] as string[]).includes(prev.blockType)
       ) {
         contentJsonPayload = null;
       }
@@ -1265,6 +1294,7 @@
           caption: '',
           fillPage: false,
           widthPercent: DEFAULT_IMAGE_WIDTH_PERCENT,
+          bleed: false,
         }),
       };
     }
@@ -1435,6 +1465,8 @@
         insp_bCoTextAlign     = co.textAlign;
         insp_bCoOverlay       = co.overlay;
         insp_bCoTextColorMode = co.textColorMode;
+        insp_bCoBleed         = co.bleed;
+        insp_bCoStartOn       = co.startOn;
       } else {
         resetChapterOpeningInspector();
       }
@@ -2162,7 +2194,7 @@
                     >{block.contentText}</textarea>
 
                   {:else if block.blockType === 'SEPARATOR'}
-                    <div class="write-separator">· · ·</div>
+                    <div class="write-separator">{#if parseSeparatorContent(block.contentJson).ornament === 'line'}· · ·{:else}{@html separatorOrnamentSvg(parseSeparatorContent(block.contentJson).ornament)}{/if}</div>
 
                   {:else if block.blockType === 'PAGE_BREAK'}
                     <div class="write-page-break">
@@ -2742,6 +2774,20 @@
                 onchange={() => { markInspectorDirty(); onInspectorBlur(); }}
               />
             </div>
+            <div class="insp-field insp-field--inline">
+              <label class="insp-label insp-label--inline" for="ib-img-bleed">
+                A sangre
+                <span class="insp-hint">Con «Ocupar toda la página»: la imagen llega hasta el borde de la hoja.</span>
+              </label>
+              <input
+                id="ib-img-bleed"
+                type="checkbox"
+                class="insp-checkbox"
+                bind:checked={insp_bImageBleed}
+                disabled={!insp_bImageFillPage}
+                onchange={() => { markInspectorDirty(); onInspectorBlur(); }}
+              />
+            </div>
           {:else if inspSurface === 'chapter_opening'}
             <div class="insp-field">
               <label class="insp-label" for="ib-co-label">Etiqueta del capítulo</label>
@@ -2780,6 +2826,8 @@
                 textAlign: insp_bCoTextAlign,
                 overlay: insp_bCoOverlay,
                 textColorMode: insp_bCoTextColorMode,
+                bleed: insp_bCoBleed,
+                startOn: insp_bCoStartOn,
               })}">
                 {#if insp_bCoAssetId}
                   {@const sel = bookAssets.find(a => a.id === insp_bCoAssetId)}
@@ -2875,6 +2923,33 @@
                 {/each}
               </select>
             </div>
+            <div class="insp-field insp-field--inline">
+              <label class="insp-label insp-label--inline" for="ib-co-bleed">
+                A sangre
+                <span class="insp-hint">La ilustración llega hasta el borde de la hoja, sin márgenes.</span>
+              </label>
+              <input
+                id="ib-co-bleed"
+                type="checkbox"
+                class="insp-checkbox"
+                bind:checked={insp_bCoBleed}
+                onchange={() => { markInspectorDirty(); onInspectorBlur(); }}
+              />
+            </div>
+            <div class="insp-field">
+              <label class="insp-label" for="ib-co-starton">Colocar en</label>
+              <select
+                id="ib-co-starton"
+                class="insp-select"
+                bind:value={insp_bCoStartOn}
+                onchange={() => { markInspectorDirty(); onInspectorBlur(); }}
+              >
+                {#each CHAPTER_OPENING_START_ON_VALUES as v}
+                  <option value={v}>{chapterOpeningStartOnLabel(v)}</option>
+                {/each}
+              </select>
+              <span class="insp-hint">«Página par» deja la ilustración a la izquierda y el capítulo empieza enfrente.</span>
+            </div>
           {:else if inspSurface === 'title_page'}
             <!-- ── Inspector: TITLE_PAGE ─────────────────────────────── -->
             <p class="insp-hint insp-hint--block">
@@ -2945,8 +3020,25 @@
               <p>Este bloque fuerza un salto de página en la maquetación final. No lleva texto.</p>
             </div>
           {:else if inspSurface === 'none'}
+            {#if insp_bType === 'SEPARATOR'}
+              <div class="insp-field">
+                <label class="insp-label" for="ib-sep-orn">Ornamento</label>
+                <select
+                  id="ib-sep-orn"
+                  class="insp-select"
+                  bind:value={insp_bSepOrnament}
+                  onchange={() => { markInspectorDirty(); onInspectorBlur(); }}
+                >
+                  {#each SEPARATOR_ORNAMENTS as o}
+                    <option value={o}>{separatorOrnamentLabel(o)}</option>
+                  {/each}
+                </select>
+                <div class="insp-ornament-preview" aria-hidden="true">{@html separatorOrnamentSvg(insp_bSepOrnament)}</div>
+                <span class="insp-hint">Úsalo bajo el título del capítulo, entre escenas o al cerrar una sección.</span>
+              </div>
+            {/if}
             <div class="insp-static-note insp-static-note--subtle">
-              <p>Separador visual. Opcionalmente puedes añadir una nota interna (no se mostrará como texto principal hasta definir estilo).</p>
+              <p>Nota interna opcional (no se imprime).</p>
               <div class={inspEditorWrapClass}>
                 <textarea
                   class="insp-textarea insp-textarea--short"
@@ -5919,4 +6011,15 @@
     0%, 100% { opacity: 0.4; }
     50% { opacity: 1; }
   }
+  .insp-ornament-preview {
+    margin-top: 8px;
+    padding: 10px;
+    border-radius: 6px;
+    background: #f6f4ef;
+    color: #2a2a2a;
+    display: flex;
+    justify-content: center;
+  }
+  .insp-ornament-preview :global(svg) { height: 22px; width: auto; }
+  .write-separator :global(svg) { height: 18px; width: auto; color: currentColor; }
 </style>

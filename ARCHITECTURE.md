@@ -299,13 +299,26 @@ El motor (`page-layout-engine.ts`) es TypeScript puro. En el navegador **1 unida
 - Cabecera y folio se dibujan dentro de los márgenes y no restan alto a la caja de texto.
 - Huérfanas: mínimo 2 líneas de párrafo al pie y 2 al inicio de página.
 - Una imagen que no cabe pasa a la página siguiente, salvo que reducida a ≥ 80 % de su alto quepa en el hueco.
+- Guionización: con `LayoutSettings.hyphenate` el motor inserta guiones blandos (U+00AD, patrones de español del paquete `hyphen`) en párrafos, citas y frases centradas ANTES de medir. El CSS usa `hyphens: manual`, así la partición es la misma en todos los sistemas. Si un párrafo se corta en mitad de palabra, el fragmento termina con un guion visible.
 
 ### Reglas especiales de paginación
 - `PAGE_BREAK` → nueva página inmediata
 - `CHAPTER_OPENING`, `TITLE_PAGE` → página dedicada (nueva página antes y después)
 - `IMAGE` con `fillPage: true` → página dedicada (ocupa la caja de texto)
 - `IMAGE` en sección `COVER` → hoja completa a sangre
+- `IMAGE` con `fillPage` + `bleed` → hoja completa a sangre
+- `CHAPTER_OPENING` con `bleed` → ilustración a sangre; el texto superpuesto queda dentro de la caja de texto
+- `CHAPTER_OPENING.startOn` = `left` | `right` → la apertura cae en página par/impar (se inserta un blanco si hace falta). Si es el primer bloque de la sección, manda sobre «Iniciar en página derecha»
+- `SEPARATOR` → alto fijo según ornamento (`separator-content.ts`: línea, rombo, floritura, asterismo, puntos, espacio); SVG propios
 - `IMAGE` en el flujo → ancho `widthPercent` (100/75/50/33 % de la columna), alto según proporción
+
+### Cabecera y folio (`page-furniture.ts`)
+- `footerConfigJson`: `folioStyle` (`plain` 7 · `dashes` — 7 — · `dots` · 7 · · `brackets` [ 7 ]) y `position` (`center` | `outside`).
+- `headerConfigJson`: `content` (`section` | `book` | `alternate`: libro en pares, capítulo en impares), `position`, `uppercase`.
+- No se dibujan en páginas de composición completa (aperturas, imágenes a página completa, portada).
+
+### PDF de impresión con sangrado
+Con `bleedMm` > 0 y formato `print`, cada hoja del PDF mide `ancho + sangrado` × `alto + 2 × sangrado` (sangrado por el corte exterior, arriba y abajo; el lomo no lleva). Es la convención de KDP e IngramSpark para interiores. Las capas a sangre de `BookPage` se extienden por esa zona; el resto del contenido conserva su posición respecto al corte. El PDF de pantalla siempre sale al tamaño de corte.
 - `keepTogether`, `pageBreakBefore`, `pageBreakAfter` → controlables por bloque
 
 ---
@@ -434,7 +447,7 @@ Estas reglas son **no negociables**.
 **Fase A — Diseño de página avanzado**
 - Opción C ampliada: plantillas de sección con slots de posición libre (libre-canvas ligero)
 - Soporte de imágenes de fondo por sección (no solo CHAPTER_OPENING)
-- Sangrado real en PDF de imprenta (bleed + crop marks)
+- Marcas de corte y PDF/X para imprenta tradicional (el sangrado ya está en el PDF de impresión)
 
 **Fase B — Distribución multiplataforma**
 - Build `.dmg` (macOS) con notarización Apple

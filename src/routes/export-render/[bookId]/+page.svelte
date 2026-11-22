@@ -9,6 +9,9 @@
    * Contrato con el proceso main:
    *   - @page { size: <ancho>mm <alto>mm; margin: 0 } → tamaño real de la hoja
    *     (printToPDF con preferCSSPageSize: true).
+   *   - format=print con «Sangrado» > 0: cada hoja crece el sangrado por el corte
+   *     exterior, arriba y abajo (convención KDP / IngramSpark para interiores):
+   *     ancho + sangrado, alto + 2 × sangrado. El lomo no lleva sangrado.
    *   - window.__exportReady → Promise que resuelve con
    *       { ok: true, pages, widthMm, heightMm }  cuando el layout está pintado,
    *       las fuentes cargadas y TODAS las imágenes decodificadas;
@@ -30,6 +33,8 @@
     | { ok: false; error: string };
 
   let bookId = $derived($page.params.bookId);
+
+  let format = $derived(($page.url.searchParams.get('format') ?? 'screen') === 'print' ? 'print' : 'screen');
 
   let layout    = $state<PaginatedBookResult | null>(null);
   let assets    = $state<Asset[]>([]);
@@ -84,8 +89,8 @@
       // Dos frames para asegurar que el último layout está pintado.
       await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 
-      const { widthMm, heightMm } = pageDimensionsMm(layout.layoutSettings);
-      signal({ ok: true, pages: layout.pages.length, widthMm, heightMm });
+      const sheet = sheetMm(layout);
+      signal({ ok: true, pages: layout.pages.length, widthMm: sheet.widthMm, heightMm: sheet.heightMm });
     } catch (e) {
       loadError = e instanceof Error ? e.message : String(e);
       signal({ ok: false, error: loadError });
@@ -93,12 +98,24 @@
   }
 
   $effect(() => { if (bookId) void load(bookId); });
+
+  /** Sangrado de imprenta efectivo (solo PDF de impresión). */
+  function bleedFor(l: PaginatedBookResult): number {
+    return format === 'print' ? Math.max(0, l.layoutSettings.bleedMm ?? 0) : 0;
+  }
+
+  /** Tamaño de cada hoja del PDF (recorte + sangrado). */
+  function sheetMm(l: PaginatedBookResult): { widthMm: number; heightMm: number; bleedMm: number } {
+    const { widthMm, heightMm } = pageDimensionsMm(l.layoutSettings);
+    const b = bleedFor(l);
+    return { widthMm: widthMm + b, heightMm: heightMm + b * 2, bleedMm: b };
+  }
 </script>
 
 <svelte:head>
   <title>Export render</title>
   {#if layout}
-    {@const dims = pageDimensionsMm(layout.layoutSettings)}
+    {@const dims = sheetMm(layout)}
     {@html `<style>@page{size:${dims.widthMm}mm ${dims.heightMm}mm;margin:0}</style>`}
   {/if}
 </svelte:head>
@@ -108,10 +125,17 @@
 {:else if !layout}
   <div class="msg">Cargando…</div>
 {:else}
+  {@const sheet = sheetMm(layout)}
   <div class="export-root">
     {#each layout.pages as pg (pg.internalIndex)}
-      <div class="export-page">
-        <BookPage {bookId} {layout} page={pg} {assets} mode="print" />
+      <div class="export-page" style="width:{sheet.widthMm}mm;height:{sheet.heightMm}mm">
+        <!-- La hoja recortada se desplaza el sangrado: arriba siempre, a la izquierda solo en verso. -->
+        <div
+          class="export-trim"
+          style="top:{sheet.bleedMm}mm;left:{pg.side === 'left' ? sheet.bleedMm : 0}mm"
+        >
+          <BookPage {bookId} {layout} page={pg} {assets} mode="print" bleedMm={sheet.bleedMm} />
+        </div>
       </div>
     {/each}
   </div>
@@ -132,9 +156,14 @@
 
   /* Una hoja por página impresa. BookPage ya mide exactamente el tamaño de la hoja. */
   .export-page {
+    position: relative;
+    overflow: hidden;
     break-after: page;
     page-break-after: always;
     break-inside: avoid;
+  }
+  .export-trim {
+    position: absolute;
   }
   .export-page:last-child {
     break-after: auto;

@@ -38,6 +38,7 @@
   "dependencies": {
     "docx": "^9.6.1",
     "gray-matter": "^4.0.3",
+    "hyphen": "^1.14.1",
     "jszip": "^3.10.1",
     "marked": "^13.0.3",
     "pagedjs": "^0.4.3",

@@ -22,6 +22,7 @@ import type { ExportJob, ExportType, CreateExportJobInput, UpdateExportJobInput 
 import { bookToMarkdown }      from '$lib/core/editorial/blocks-to-markdown';
 import { resolveBookStyles }   from '$lib/core/editorial/book-styles';
 import { bookBaseFontFamily }  from '$lib/core/editorial/block-render-css';
+import { parseSeparatorContent, separatorTextGlyph } from '$lib/core/editorial/separator-content';
 
 // ─── Tipo agregado ────────────────────────────────────────────────────────────
 
@@ -162,7 +163,14 @@ function blocksToXhtml(
       case 'HEADING_4': lines.push(`  <h4>${text}</h4>`); break;
       case 'PARAGRAPH': lines.push(`  <p>${text}</p>`); break;
       case 'CENTERED_PHRASE': lines.push(`  <p class="centered">${text}</p>`); break;
-      case 'SEPARATOR': lines.push('  <hr/>'); break;
+      case 'SEPARATOR': {
+        const orn = parseSeparatorContent(b.contentJson).ornament;
+        const glyph = separatorTextGlyph(orn);
+        if (glyph === null) lines.push('  <hr/>');
+        else if (glyph === '') lines.push('  <p class="ornament">&#160;</p>');
+        else lines.push(`  <p class="ornament">${xmlEsc(glyph)}</p>`);
+        break;
+      }
       case 'PAGE_BREAK': lines.push('  <p class="page-break"/>'); break;
       case 'QUOTE': {
         const qlines = (b.contentText ?? '').split('\n');
@@ -269,6 +277,7 @@ async function buildEpubZip(data: BookExportData, bookId: string): Promise<Uint8
     familyRule('.chapter-label', roleStyles.CHAPTER_OPENING_LABEL.fontFamily),
     familyRule('.chapter-title', roleStyles.CHAPTER_OPENING_TITLE.fontFamily),
     '.chapter-opening { margin: 0 0 1em; text-align: center; }',
+    '.ornament { text-align: center; margin: 1em 0; letter-spacing: 0.2em; }',
     '.centered { text-align: center; }',
     '.chapter-label { text-align: center; font-size: 0.85em; letter-spacing: 0.1em; text-transform: uppercase; }',
     '.chapter-title { text-align: center; font-size: 1.8em; margin: 0.5em 0; }',

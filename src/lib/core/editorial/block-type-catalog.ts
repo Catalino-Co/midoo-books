@@ -2,6 +2,7 @@
  * Catálogo UI y pistas de edición para tipos de bloque (sin Svelte / SQL).
  */
 
+import { parseSeparatorContent, separatorOrnamentLabel } from './separator-content';
 import type { BlockType } from '$lib/core/domain/block';
 import { parseImageBlockContent } from './image-block-content';
 import { parseChapterOpeningContent } from './chapter-opening-content';
@@ -161,8 +162,8 @@ export function blockContentPreview(
   const t = block.blockType;
   if (t === 'PAGE_BREAK') return 'Salto de página';
   if (t === 'SEPARATOR') {
-    const s = block.contentText.replace(/\s+/g, ' ').trim();
-    return s ? (s.length > maxLen ? s.slice(0, maxLen) + '…' : s) : 'Separador';
+    const orn = parseSeparatorContent(block.contentJson ?? null).ornament;
+    return orn === 'line' ? 'Separador' : `Separador · ${separatorOrnamentLabel(orn)}`;
   }
   if (t === 'IMAGE') {
     const img = parseImageBlockContent(block.contentJson ?? null);

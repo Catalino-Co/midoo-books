@@ -13,6 +13,8 @@ import type { DocumentBlock } from '$lib/core/domain/block';
 import type { DocumentSection, SectionType } from '$lib/core/domain/section';
 import { DEFAULT_LAYOUT_SETTINGS } from '$lib/core/domain/layout';
 import { parseImageBlockContent } from './image-block-content';
+import { parseChapterOpeningContent } from './chapter-opening-content';
+import { hyphenateBlock } from './hyphenation';
 import type {
   AssetDimensions,
   BookLayoutSnapshot,
@@ -26,8 +28,8 @@ import {
   IMAGE_CAPTION_FONT_PT,
   IMAGE_CAPTION_GAP_PT,
   IMAGE_CAPTION_LINE_HEIGHT,
-  SEPARATOR_BLOCK_HEIGHT_PX,
 } from './block-render-css';
+import { parseSeparatorContent, separatorHeightPx } from './separator-content';
 import { pageSpreadSide } from './page-layout-model';
 import { buildEditorialFrames } from './editorial-page-numbering';
 import {
@@ -509,7 +511,9 @@ class Paginator {
         return this.imageLayoutFor(block).units;
       }
       case 'SEPARATOR':
-        return this.textMeasurement ? SEPARATOR_BLOCK_HEIGHT_PX : 40;
+        return this.textMeasurement
+          ? separatorHeightPx(parseSeparatorContent(block.contentJson).ornament)
+          : 40;
       case 'PAGE_BREAK':
         return 0;
       case 'CHAPTER_OPENING':
@@ -527,33 +531,40 @@ class Paginator {
   }
 
   /**
-   * Fuerza inicio en recto (impar físico en convención v1: índice 0 = derecha).
-   * Si la primera página de la sección caería en verso vacío, se reutiliza como blanco editorial
-   * y se abre una nueva página de contenido en recto.
+   * Garantiza que el siguiente contenido empiece en una página del lado pedido
+   * (convención v1: índice 0 = derecha/recto). Si hace falta, la página vacía actual
+   * se convierte en blanco editorial o se inserta uno.
    */
-  ensureStartOnRightPage(section: DocumentSection): void {
-    if (!section.startOnRightPage) return;
-    if (pageSpreadSide(this.currentIdx) === 'right' && this.used === 0) return;
-    if (pageSpreadSide(this.currentIdx) === 'right' && this.used > 0) {
-      this.startNewContentPage('Nueva página antes de sección en recto');
+  ensureStartOnSide(side: 'left' | 'right', reason: string): void {
+    const other = side === 'right' ? 'left' : 'right';
+    if (pageSpreadSide(this.currentIdx) === side && this.used === 0) return;
+    if (pageSpreadSide(this.currentIdx) === side && this.used > 0) {
+      this.startNewContentPage(`Nueva página antes de ${reason}`);
     }
-    if (pageSpreadSide(this.currentIdx) === 'left') {
+    if (pageSpreadSide(this.currentIdx) === other) {
+      const note = `Página en blanco editorial (${reason})`;
       const p = this.pages[this.currentIdx];
       if (this.used === 0 && p.placements.length === 0 && p.kind === 'content') {
         p.kind = 'editorial_blank';
         p.primarySectionId    = null;
         p.primarySectionType  = null;
         p.primarySectionTitle = null;
-        p.debugNotes.push('Página en blanco editorial (forzar inicio en recto)');
+        p.debugNotes.push(note);
         this.appendContentPage();
       } else {
-        this.appendBlankPage('Página en blanco editorial (forzar inicio en recto)');
+        this.appendBlankPage(note);
         this.appendContentPage();
       }
     }
   }
 
-  beginSection(section: DocumentSection, isFirst: boolean): void {
+  /** Inicio de sección en recto (opción «Iniciar en página derecha»). */
+  ensureStartOnRightPage(section: DocumentSection): void {
+    if (!section.startOnRightPage) return;
+    this.ensureStartOnSide('right', 'forzar inicio en recto');
+  }
+
+  beginSection(section: DocumentSection, isFirst: boolean, firstBlock?: DocumentBlock): void {
     if (sectionStartsOnFreshPage(section.sectionType, isFirst)) {
       if (this.used > 0) {
         this.startNewContentPage(`Inicio de sección: ${section.sectionType}`);
@@ -562,7 +573,18 @@ class Paginator {
         this.startNewContentPage(`Nueva sección: ${section.sectionType}`);
       }
     }
-    this.ensureStartOnRightPage(section);
+    // Si la sección abre con una apertura de capítulo con lado fijo, ese lado manda:
+    // p. ej. apertura en par (izquierda) → el texto empieza enfrente, en impar.
+    const openingSide = firstBlock?.blockType === 'CHAPTER_OPENING'
+      ? parseChapterOpeningContent(firstBlock.contentJson).startOn
+      : 'next';
+    if (openingSide === 'left' || openingSide === 'right') {
+      this.ensureStartOnSide(openingSide, openingSide === 'left'
+        ? 'apertura en página par'
+        : 'apertura en página impar');
+    } else {
+      this.ensureStartOnRightPage(section);
+    }
     this.touchPrimarySection(section);
   }
 
@@ -1010,6 +1032,10 @@ class Paginator {
 
     if (block.blockType === 'CHAPTER_OPENING') {
       if (this.used > 0) this.startNewContentPage('CHAPTER_OPENING en página dedicada');
+      const startOn = parseChapterOpeningContent(block.contentJson).startOn;
+      if (startOn === 'left' || startOn === 'right') {
+        this.ensureStartOnSide(startOn, startOn === 'left' ? 'apertura en página par' : 'apertura en página impar');
+      }
       const h = Math.min(
         this.metrics.pageBodyHeightUnits,
         this.estimateBlockHeightForPlacement(block, section),
@@ -1171,7 +1197,7 @@ function paginateBookPass(
     const blocks = [...(snapshot.blocksBySectionId[section.id] ?? [])].sort(
       (a, b) => a.orderIndex - b.orderIndex,
     );
-    pag.beginSection(section, first);
+    pag.beginSection(section, first, blocks[0]);
     first = false;
 
     const autoInsertTocAtSectionStart =
@@ -1208,6 +1234,14 @@ export function buildPaginatedLayout(
   snapshot: BookLayoutSnapshot,
   options: BuildPaginatedLayoutOptions = {},
 ): PaginatedBookResult {
+  if (snapshot.layoutSettings.hyphenate) {
+    // Copia con guiones blandos en el texto corrido: medición y render parten igual.
+    const blocksBySectionId: BookLayoutSnapshot['blocksBySectionId'] = {};
+    for (const [sid, list] of Object.entries(snapshot.blocksBySectionId)) {
+      blocksBySectionId[sid] = list.map(hyphenateBlock);
+    }
+    snapshot = { ...snapshot, blocksBySectionId };
+  }
   const sections = [...snapshot.sections].sort((a, b) => a.orderIndex - b.orderIndex);
   const tocConfig = resolveTocConfig(snapshot.layoutSettings.tocConfigJson);
   const engineMetrics = options.engineMetrics ?? computeLayoutEngineMetrics(snapshot.layoutSettings);

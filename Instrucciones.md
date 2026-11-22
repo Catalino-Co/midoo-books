@@ -23,7 +23,7 @@ Define el **trim size** y los **márgenes** que usa el motor de paginación y el
 | **Margen interior (lomo)** | En **doble cara**, es el margen del **lado del lomo** (donde se encuaderna). En recto/verso la app intercambia interior/exterior para que el lomo quede coherente con el preview. |
 | **Margen exterior (corte)** | Margen del **lado del corte** (borde externo de la página), frente al interior. |
 | **Páginas enfrentadas (interior / exterior)** | Si está activo, se usan **márgenes distintos** en izquierda y derecha según sea **verso o recto** (espejo típico de libro). Si está desactivado, los márgenes horizontales se **promedian** (simétricos), pensado para borrador o PDF de una sola cara. |
-| **Sangrado (mm, opcional)** | Valor persistido para **bleed** futuro. Hoy sirve sobre todo para **visual** en preview (halo alrededor de la hoja si es mayor que 0). No sustituye aún un PDF de imprenta con sangrado real. |
+| **Sangrado (mm, opcional)** | En el **PDF de impresión** cada hoja crece este valor por el corte exterior, arriba y abajo (el lomo no), y las imágenes y aperturas «a sangre» lo cubren. KDP pide 3,2 mm (0,125 in). En la vista previa se ve con el botón **Guías**. El PDF de pantalla no lo usa. |
 | **Zona segura extra (mm)** | Inset **uniforme** hacia dentro **desde el borde del área útil**; en preview se muestra como **guía discontinua** para no pegar elementos críticos al borde. `0` = desactivado. |
 
 **Nota:** Los márgenes en dominio se interpretan en la **misma unidad** que `pageUnit` (como el resto de dimensiones de página en `LayoutSettings`).
@@ -35,7 +35,8 @@ Define el **trim size** y los **márgenes** que usa el motor de paginación y el
 Siguen en la misma página y se guardan con el mismo botón **Guardar ajustes**:
 
 - **Numeración**: folio editorial (activar/desactivar), estilo de preliminares (romanos, etc.), número inicial del cuerpo, desde qué sección empieza el cuerpo en arábigos.
-- **Cabecera y pie**: mostrar pie y/o cabecera en preview.
+- **Cabecera y pie**: folio (número de página) con estilo «7», «— 7 —», «· 7 ·» o «[ 7 ]», centrado o en el corte exterior; cabecera (titulillo) con el título del capítulo, del libro o alternada (libro en pares, capítulo en impares), opcionalmente en mayúsculas espaciadas. Ambos van dentro de los márgenes y no aparecen en aperturas ni páginas a sangre.
+- **Tipografía**: **Guionización automática (español)** parte palabras al final de línea con las reglas del español; reduce los huecos del texto justificado. Se aplica igual en vista previa y PDF.
 - **Índice automático**: título del TOC, texto del título, puntos guía entre título y número de página.
 - **Ocultar número en tipos especiales**: tipos de sección donde el número puede ocultarse aunque la página cuente en el flujo.
 

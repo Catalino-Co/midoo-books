@@ -14,6 +14,7 @@ import {
   textBlockCss,
   textBlockTag,
 } from './block-render-css';
+import { materializeTrailingSoftHyphen } from './hyphenation';
 
 const PT_TO_PX = 96 / 72;
 /** Sin holgura: el medidor usa el mismo CSS y ancho que el render. */
@@ -171,7 +172,8 @@ export class BrowserPreviewTextMeasurer implements LayoutTextMeasurementAdapter 
       widowOrphanAdjusted = true;
     }
 
-    const firstText = text.slice(0, cut).replace(/\s+$/u, '');
+    // Corte en mitad de palabra (guion blando): el guion debe verse al pie de página.
+    const firstText = materializeTrailingSoftHyphen(text.slice(0, cut).replace(/\s+$/u, ''));
     const restText = text.slice(cut).replace(/^\s+/u, '');
     if (!restText) return null;
 

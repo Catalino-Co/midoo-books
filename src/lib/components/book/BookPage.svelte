@@ -18,6 +18,10 @@
    *     el medidor). No añadir aquí reglas que cambien la altura del texto.
    *   - mode = 'preview' puede mostrar guías; mode = 'print' nunca dibuja nada que no
    *     sea parte del libro.
+   *   - Composiciones «a sangre» (portada, imagen a página completa con sangre, apertura
+   *     de capítulo con sangre) se dibujan sobre la hoja, no en la caja de texto. Con
+   *     `bleedMm` > 0 (PDF de imprenta) se extienden también por el sangrado exterior,
+   *     superior e inferior; el lado del lomo nunca lleva sangrado.
    */
   import type { PaginatedBookResult, PlacedBlock, RenderedPage } from '$lib/core/editorial/page-layout-model';
   import type { Asset } from '$lib/core/domain/asset';
@@ -32,11 +36,20 @@
     bookBaseFontFamily,
     imageCaptionCss,
     IMAGE_BLOCK_MARGIN_PT,
-    SEPARATOR_BLOCK_HEIGHT_PX,
     textBlockCss,
     textBlockTag,
   } from '$lib/core/editorial/block-render-css';
   import { assetDisplayUrl } from '$lib/services/assets.service';
+  import {
+    furnitureTextAlign,
+    parseFooterConfig,
+    parseHeaderConfig,
+  } from '$lib/core/editorial/page-furniture';
+  import {
+    parseSeparatorContent,
+    separatorHeightPx,
+    separatorOrnamentSvg,
+  } from '$lib/core/editorial/separator-content';
   import {
     parseImageBlockContent,
     parseChapterOpeningContent,
@@ -51,6 +64,7 @@
     assets = [],
     mode = 'preview',
     showGuides = false,
+    bleedMm = 0,
   }: {
     bookId: string;
     layout: PaginatedBookResult;
@@ -58,6 +72,8 @@
     assets?: Asset[];
     mode?: 'preview' | 'print';
     showGuides?: boolean;
+    /** Sangrado de imprenta (solo PDF de impresión). 0 = recorte exacto. */
+    bleedMm?: number;
   } = $props();
 
   let settings   = $derived(layout.layoutSettings);
@@ -108,6 +124,35 @@
     return pl.block?.blockType === 'IMAGE' && page.primarySectionType === 'COVER';
   }
 
+  /** Colocación que se dibuja a sangre, sobre la hoja completa. */
+  function isBleedPlacement(pl: PlacedBlock): boolean {
+    if (!pl.block) return false;
+    if (isCoverImage(pl)) return true;
+    if (pl.block.blockType === 'IMAGE') {
+      const im = parseImageBlockContent(pl.block.contentJson);
+      return im.fillPage && im.bleed;
+    }
+    if (pl.block.blockType === 'CHAPTER_OPENING') {
+      return parseChapterOpeningContent(pl.block.contentJson).bleed;
+    }
+    return false;
+  }
+
+  /** Motivo legible de una página en blanco editorial (solo vista previa). */
+  let blankReason = $derived(
+    page.debugNotes.some(n => n.includes('página par'))
+      ? 'para que la apertura quede en página par'
+      : page.debugNotes.some(n => n.includes('página impar'))
+        ? 'para que la apertura quede en página impar'
+        : 'para que la sección empiece en página impar',
+  );
+
+  let bleedPlacements = $derived(page.placements.filter(isBleedPlacement));
+  let flowPlacements  = $derived(page.placements.filter(pl => !isBleedPlacement(pl)));
+
+  /** Sangrado real solo al imprimir. */
+  let bleed = $derived(mode === 'print' ? Math.max(0, bleedMm) : 0);
+
   function isFillPageImage(pl: PlacedBlock): boolean {
     if (pl.block?.blockType !== 'IMAGE') return false;
     return parseImageBlockContent(pl.block.contentJson).fillPage;
@@ -132,24 +177,50 @@
     `height:${frame.box.heightMm}mm`,
   ].join(';'));
 
-  /** Caja a sangre relativa a la caja de contenido (para portadas). */
+  /**
+   * Capa a sangre relativa a la hoja: la hoja entera más el sangrado por arriba,
+   * abajo y el corte exterior (izquierda en verso, derecha en recto).
+   */
   let bleedStyle = $derived([
-    `top:-${frame.box.topMm}mm`,
-    `left:-${frame.box.leftMm}mm`,
+    `top:-${bleed}mm`,
+    `left:${page.side === 'left' ? -bleed : 0}mm`,
+    `width:${frame.pageWidthMm + bleed}mm`,
+    `height:${frame.pageHeightMm + bleed * 2}mm`,
+  ].join(';'));
+
+  /** Marco de la hoja (sin sangrado) dentro de la capa a sangre. */
+  let trimInBleedStyle = $derived([
+    `top:${bleed}mm`,
+    `left:${page.side === 'left' ? bleed : 0}mm`,
     `width:${frame.pageWidthMm}mm`,
     `height:${frame.pageHeightMm}mm`,
   ].join(';'));
 
+  /** El texto sobre una apertura a sangre se mantiene dentro de la caja de texto. */
+  let bleedTextInsetStyle = $derived([
+    `top:${frame.box.topMm}mm`,
+    `left:${frame.box.leftMm}mm`,
+    `width:${frame.box.widthMm}mm`,
+    `height:${frame.box.heightMm}mm`,
+  ].join(';'));
+
+  let headerCfg = $derived(parseHeaderConfig(settings.headerConfigJson));
+  let footerCfg = $derived(parseFooterConfig(settings.footerConfigJson));
+
+  // Cabecera y folio se alinean con la caja de texto (mismo ancho que la columna).
   let headerStyle = $derived([
     `top:${frame.headerCenterFromTopMm}mm`,
     `left:${frame.marginLeftMm}mm`,
     `right:${frame.marginRightMm}mm`,
-  ].join(';'));
+    `text-align:${furnitureTextAlign(headerCfg.position, page.side)}`,
+    headerCfg.uppercase ? 'text-transform:uppercase;letter-spacing:0.12em;font-size:7pt' : '',
+  ].filter(Boolean).join(';'));
 
   let footerStyle = $derived([
     `bottom:${frame.footerCenterFromBottomMm}mm`,
     `left:${frame.marginLeftMm}mm`,
     `right:${frame.marginRightMm}mm`,
+    `text-align:${furnitureTextAlign(footerCfg.position, page.side)}`,
   ].join(';'));
 
   let safeGuideStyle = $derived(
@@ -165,20 +236,57 @@
   class="bp-page"
   class:bp-page--preview={mode === 'preview'}
   class:bp-page--blank={page.kind === 'editorial_blank'}
+  class:bp-page--bleed={bleed > 0}
   style={pageStyle}
   data-page={page.physicalPageNumber}
 >
   {#if page.kind === 'editorial_blank'}
     {#if mode === 'preview'}
-      <p class="bp-blank-hint">Página en blanco<br /><span>(para que la sección empiece en página impar)</span></p>
+      <p class="bp-blank-hint">Página en blanco<br /><span>({blankReason})</span></p>
     {/if}
   {:else}
+    {#each bleedPlacements as pl, bi (`bleed-${pl.block?.id ?? bi}`)}
+      <div class="bp-bleed" style={bleedStyle}>
+        {#if pl.block?.blockType === 'CHAPTER_OPENING'}
+          {@const co = parseChapterOpeningContent(pl.block.contentJson)}
+          {@const url = assetUrlFor(co.assetId)}
+          <div class="co co--bleed {chapterOpeningPreviewRootClassNames(co)}" class:co--no-img={!url}>
+            {#if url}
+              <img class="co__img" src={url} alt="" />
+            {:else if mode === 'preview'}
+              <div class="co__ph">{co.assetId ? 'Imagen no disponible' : 'Sin imagen'}</div>
+            {/if}
+            <div class="bp-trim" style={trimInBleedStyle}>
+              <div class="co__safe" style={bleedTextInsetStyle}>
+                <div class="co__text">
+                  {#if co.chapterLabel.trim()}
+                    <span class="co__label" style={overlayTextCss(bookStyles.CHAPTER_OPENING_LABEL, co.textAlign)}>{co.chapterLabel}</span>
+                  {/if}
+                  {#if co.title.trim()}
+                    <span class="co__title" style={overlayTextCss(bookStyles.CHAPTER_OPENING_TITLE, co.textAlign)}>{co.title}</span>
+                  {/if}
+                </div>
+              </div>
+            </div>
+          </div>
+        {:else if pl.block?.blockType === 'IMAGE'}
+          {@const im = parseImageBlockContent(pl.block.contentJson)}
+          {@const url = assetUrlFor(im.assetId)}
+          {#if url}
+            <img class="bp-fill-img" src={url} alt={im.altText || ''} />
+          {:else if mode === 'preview'}
+            <div class="img-ph img-ph--full">Sin imagen</div>
+          {/if}
+        {/if}
+      </div>
+    {/each}
+
     {#if page.editorial.headerText && !fullPage}
       <div class="bp-running-head" style={headerStyle}>{page.editorial.headerText}</div>
     {/if}
 
     <div class="bp-box" style={boxStyle}>
-      {#each page.placements as pl, pi (`${pl.block?.id ?? pl.syntheticType ?? 'syn'}-${pi}-${pl.textOverride ?? ''}`)}
+      {#each flowPlacements as pl, pi (`${pl.block?.id ?? pl.syntheticType ?? 'syn'}-${pi}-${pl.textOverride ?? ''}`)}
         {#if pl.syntheticType === 'TOC'}
           <div class="bp-block">
             <section class="toc">
@@ -253,11 +361,7 @@
         {:else if pl.block?.blockType === 'IMAGE'}
           {@const im = parseImageBlockContent(pl.block.contentJson)}
           {@const url = assetUrlFor(im.assetId)}
-          {#if isCoverImage(pl)}
-            <div class="bp-bleed" style={bleedStyle}>
-              {#if url}<img class="bp-fill-img" src={url} alt={im.altText || ''} />{/if}
-            </div>
-          {:else if im.fillPage}
+          {#if im.fillPage}
             <div class="bp-block bp-block--full">
               {#if url}
                 <img class="bp-fill-img" src={url} alt={im.altText || ''} />
@@ -289,7 +393,12 @@
           {/if}
 
         {:else if pl.block?.blockType === 'SEPARATOR'}
-          <div class="bp-block sep" style="height:{SEPARATOR_BLOCK_HEIGHT_PX}px" aria-hidden="true"><hr /></div>
+          {@const sep = parseSeparatorContent(pl.block.contentJson)}
+          <div
+            class="bp-block sep sep--{sep.ornament}"
+            style="height:{separatorHeightPx(sep.ornament)}px"
+            aria-hidden="true"
+          >{@html separatorOrnamentSvg(sep.ornament)}</div>
 
         {:else if pl.block?.blockType === 'PAGE_BREAK'}
           <!-- salto de página explícito: ya es página separada -->
@@ -333,6 +442,8 @@
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+  /* En el PDF de imprenta la capa a sangre sobresale de la hoja; recorta el contenedor. */
+  .bp-page--bleed { overflow: visible; }
   .bp-page--preview.bp-page--blank {
     background: #fbfbf9;
   }
@@ -399,19 +510,35 @@
   .bp-bleed {
     position: absolute;
     overflow: hidden;
+    z-index: 0;
   }
+  .bp-trim {
+    position: absolute;
+    pointer-events: none;
+  }
+  /* Apertura a sangre: el texto vive en la caja de texto de la hoja. */
+  .co--bleed { height: 100%; }
+  .co__safe {
+    position: absolute;
+    z-index: 1;
+  }
+  .co__safe .co__text { padding: 0; max-width: 100%; }
 
   /* ── Separador ── */
   .sep {
     display: flex;
     align-items: center;
+    justify-content: center;
+    color: #2a2a2a;
   }
-  .sep hr {
-    flex: 1;
-    margin: 0 25%;
-    border: none;
-    border-top: 0.6pt solid rgba(0, 0, 0, 0.35);
+  .sep :global(svg) {
+    display: block;
+    height: 4.6mm;
+    width: auto;
+    max-width: 100%;
   }
+  .sep--line :global(svg) { height: 3mm; opacity: 0.6; }
+  .sep--dots :global(svg) { height: 3.2mm; }
 
   /* ── Índice ── */
   .toc {

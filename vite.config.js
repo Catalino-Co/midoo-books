@@ -13,7 +13,7 @@ export default defineConfig({
     // Incluir pagedjs en el pre-bundle de Vite (esbuild).
     // Esto convierte sus dependencias CJS (como event-emitter) a ESM
     // y resuelve el error "does not provide an export named 'default'".
-    include: ['pagedjs']
+    include: ['pagedjs', 'hyphen/es']
   },
 
   ssr: {

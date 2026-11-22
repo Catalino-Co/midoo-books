@@ -1,3 +1,4 @@
+import { formatFolio, parseFooterConfig, parseHeaderConfig, resolveHeaderSource } from './page-furniture';
 import type { LayoutSettings } from '$lib/core/domain/layout';
 import type { SectionType, DocumentSection } from '$lib/core/domain/section';
 import type { RenderedPage } from './page-layout-model';
@@ -123,7 +124,12 @@ function resolveHeaderText(
     return null;
   }
   if (section && !resolveSectionEditorialRules(section).allowHeader) return null;
-  return page.primarySectionTitle?.trim() || bookTitle.trim() || null;
+  return resolveHeaderSource(
+    parseHeaderConfig(settings.headerConfigJson),
+    page.side,
+    page.primarySectionTitle,
+    bookTitle,
+  );
 }
 
 export function buildEditorialFrames(params: {
@@ -137,6 +143,7 @@ export function buildEditorialFrames(params: {
   const hiddenSectionTypes = parseHiddenSectionTypes(settings);
   const sectionsById = new Map<string, DocumentSection>(sections.map(section => [section.id, section]));
 
+  const footerConfig = parseFooterConfig(settings.footerConfigJson);
   let bodyStarted = false;
   let frontmatterOrdinal = 0;
   let bodyOrdinal = Math.max(1, settings.pageNumberStart);
@@ -167,7 +174,9 @@ export function buildEditorialFrames(params: {
 
     const showPageNumber = shouldShowPageNumber(page, section, hiddenSectionTypes, settings, editorialLabel);
     const headerText = resolveHeaderText(page, section, bookTitle, settings);
-    const footerText = showPageNumber ? editorialLabel : null;
+    const footerText = showPageNumber && editorialLabel
+      ? formatFolio(editorialLabel, footerConfig.folioStyle)
+      : null;
 
     return {
       physicalPageNumber: page.visualPageNumber,

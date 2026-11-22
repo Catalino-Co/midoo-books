@@ -121,6 +121,7 @@ export function updateLayoutSettings(
     values.push(input.hideNumberOnSectionTypes);
   }
   if (input.showHeader !== undefined) { fields.push('show_header = ?'); values.push(input.showHeader ? 1 : 0); }
+  if (input.hyphenate !== undefined)  { fields.push('hyphenate = ?');   values.push(input.hyphenate ? 1 : 0); }
   if (input.showFooter !== undefined) { fields.push('show_footer = ?'); values.push(input.showFooter ? 1 : 0); }
   if ('headerConfigJson' in input) { fields.push('header_config_json = ?'); values.push(input.headerConfigJson ?? null); }
   if ('footerConfigJson' in input) { fields.push('footer_config_json = ?'); values.push(input.footerConfigJson ?? null); }

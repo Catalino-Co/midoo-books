@@ -42,7 +42,7 @@
     {
       id: 'pdf_print',
       label: 'PDF Impresión',
-      description: 'Para impresión física. Tamaño real del libro, márgenes configurados, bleed opcional.',
+      description: 'Para imprenta (KDP, IngramSpark…). Tamaño real del libro; con «Sangrado» en Maqueta, la hoja crece por fuera, arriba y abajo.',
       available: true,
       iconPath: 'M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z',
     },
@@ -201,7 +201,7 @@
       </svg>
       <div class="format-info">
         <span class="format-name">Impresión física</span>
-        <span class="format-desc">PDF con páginas enfrentadas, bleed y marcas de registro. Para enviar a imprenta.</span>
+        <span class="format-desc">Marcas de corte y registro, perfil PDF/X. Para imprentas tradicionales.</span>
       </div>
       <span class="format-badge">Próximamente</span>
     </div>

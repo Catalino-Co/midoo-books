@@ -15,6 +15,8 @@ export interface ImageBlockContent {
    * El alto se deduce de la proporción de la imagen. Ignorado si fillPage = true.
    */
   widthPercent: number;
+  /** Solo con fillPage: la imagen llega hasta el borde de la hoja (ignora márgenes). */
+  bleed: boolean;
 }
 
 /** Anchos ofrecidos en el inspector. */
@@ -32,6 +34,7 @@ export const EMPTY_IMAGE_BLOCK_CONTENT: ImageBlockContent = {
   caption: '',
   fillPage: false,
   widthPercent: DEFAULT_IMAGE_WIDTH_PERCENT,
+  bleed: false,
 };
 
 export function parseImageBlockContent(contentJson: string | null): ImageBlockContent {
@@ -47,7 +50,8 @@ export function parseImageBlockContent(contentJson: string | null): ImageBlockCo
     const caption = typeof o.caption === 'string' ? o.caption : '';
     const fillPage = o.fillPage === true;
     const widthPercent = clampImageWidthPercent(o.widthPercent);
-    return { assetId, altText, caption, fillPage, widthPercent };
+    const bleed = o.bleed === true;
+    return { assetId, altText, caption, fillPage, widthPercent, bleed };
   } catch {
     return { ...EMPTY_IMAGE_BLOCK_CONTENT };
   }
@@ -59,7 +63,8 @@ export function serializeImageBlockContent(c: ImageBlockContent): string | null 
     || c.altText.trim() !== ''
     || c.caption.trim() !== ''
     || c.fillPage
-    || clampImageWidthPercent(c.widthPercent) !== DEFAULT_IMAGE_WIDTH_PERCENT;
+    || clampImageWidthPercent(c.widthPercent) !== DEFAULT_IMAGE_WIDTH_PERCENT
+    || c.bleed === true;
   if (!has) return null;
   return JSON.stringify({
     assetId: c.assetId && c.assetId !== '' ? c.assetId : null,
@@ -67,5 +72,6 @@ export function serializeImageBlockContent(c: ImageBlockContent): string | null 
     caption: c.caption,
     fillPage: c.fillPage,
     widthPercent: clampImageWidthPercent(c.widthPercent),
+    bleed: c.fillPage && c.bleed === true,
   });
 }

@@ -66,6 +66,8 @@ export interface LayoutSettings {
 
   // ── Cabeceras y pies ─────────────────────────────────────────────────────
   showHeader:               boolean;
+  /** Guionización automática del texto corrido (patrones de español). */
+  hyphenate:                boolean;
   showFooter:               boolean;
   headerConfigJson:         string | null;      // JSON de configuración de cabecera
   footerConfigJson:         string | null;      // JSON de configuración de pie
@@ -122,6 +124,7 @@ export const DEFAULT_LAYOUT_SETTINGS: Omit<LayoutSettings, 'id' | 'bookId' | 'cr
   bodyStartsAtSectionId:    null,
   hideNumberOnSectionTypes: JSON.stringify(DEFAULT_HIDE_PAGE_NUMBER_SECTION_TYPES),
   showHeader:               false,
+  hyphenate:                false,
   showFooter:               true,
   headerConfigJson:         null,
   footerConfigJson:         null,

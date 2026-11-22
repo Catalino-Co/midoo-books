@@ -14,6 +14,21 @@
   import type { DocumentSection, SectionType, FrontmatterNumberingStyle, PageSizePresetId, PageUnit } from '$lib/core/domain/index';
   import { DEFAULT_HIDE_PAGE_NUMBER_SECTION_TYPES } from '$lib/core/domain/index';
   import { PAGE_SIZE_PRESETS, getPageSizePresetDefinition } from '$lib/core/editorial/page-size-presets';
+  import {
+    FOLIO_STYLES,
+    FURNITURE_POSITIONS,
+    HEADER_CONTENTS,
+    folioStyleLabel,
+    headerContentLabel,
+    parseFooterConfig,
+    parseHeaderConfig,
+    positionLabel,
+    serializeFooterConfig,
+    serializeHeaderConfig,
+    type FolioStyle,
+    type FurniturePosition,
+    type HeaderContent,
+  } from '$lib/core/editorial/page-furniture';
 
   let bookId = $derived($page.params.bookId);
 
@@ -30,6 +45,12 @@
   let bodyStartsAtSectionId = $state('__auto__');
   let showFooter = $state(true);
   let showHeader = $state(false);
+  let folioStyle = $state<FolioStyle>('plain');
+  let folioPosition = $state<FurniturePosition>('center');
+  let headerContent = $state<HeaderContent>('section');
+  let headerPosition = $state<FurniturePosition>('center');
+  let headerUppercase = $state(true);
+  let hyphenate = $state(false);
   let hiddenTypes = $state<SectionType[]>([...DEFAULT_HIDE_PAGE_NUMBER_SECTION_TYPES]);
   let tocShowTitle = $state(true);
   let tocTitleText = $state('Índice');
@@ -68,6 +89,14 @@
       bodyStartsAtSectionId = layout.bodyStartsAtSectionId ?? '__auto__';
       showFooter = layout.showFooter;
       showHeader = layout.showHeader;
+      const footerCfg = parseFooterConfig(layout.footerConfigJson);
+      folioStyle = footerCfg.folioStyle;
+      folioPosition = footerCfg.position;
+      const headerCfg = parseHeaderConfig(layout.headerConfigJson);
+      headerContent = headerCfg.content;
+      headerPosition = headerCfg.position;
+      headerUppercase = headerCfg.uppercase;
+      hyphenate = layout.hyphenate;
       hiddenTypes = parseHiddenPageNumberSectionTypes(layout.hideNumberOnSectionTypes) as SectionType[];
       const tocConfig = parseLayoutTocConfig(layout.tocConfigJson);
       tocShowTitle = tocConfig.showTitle;
@@ -143,6 +172,9 @@
         hideNumberOnSectionTypes: JSON.stringify(hiddenTypes),
         showFooter,
         showHeader,
+        footerConfigJson: serializeFooterConfig({ folioStyle, position: folioPosition }),
+        headerConfigJson: serializeHeaderConfig({ content: headerContent, position: headerPosition, uppercase: headerUppercase }),
+        hyphenate,
         tocConfigJson: serializeLayoutTocConfig({
           showTitle: tocShowTitle,
           titleText: tocTitleText.trim() || 'Índice',
@@ -291,7 +323,7 @@
           </div>
         </div>
         <p class="field-help">
-          Sangrado y zona segura son visibles en preview como guías ligeras; la exportación a imprenta es fase futura.
+          Sangrado: en el PDF de impresión la hoja crece este valor por el corte exterior, arriba y abajo, y las imágenes a sangre lo cubren (KDP pide 3,2 mm). La zona segura solo es una guía de la vista previa (botón «Guías»).
         </p>
       </section>
 
@@ -348,18 +380,74 @@
 
         <label class="toggle-row">
           <span>
-            <strong>Mostrar pie de página</strong>
-            <small>Usa el número editorial visible cuando aplique.</small>
+            <strong>Mostrar folio (número de página)</strong>
+            <small>Se dibuja en el margen inferior; no resta espacio al texto.</small>
           </span>
           <input type="checkbox" bind:checked={showFooter} />
         </label>
 
+        {#if showFooter}
+          <div class="field">
+            <label for="folio-style">Estilo del folio</label>
+            <select id="folio-style" class="input" bind:value={folioStyle}>
+              {#each FOLIO_STYLES as st}
+                <option value={st}>{folioStyleLabel(st)}</option>
+              {/each}
+            </select>
+          </div>
+          <div class="field">
+            <label for="folio-pos">Posición del folio</label>
+            <select id="folio-pos" class="input" bind:value={folioPosition}>
+              {#each FURNITURE_POSITIONS as p}
+                <option value={p}>{positionLabel(p)}</option>
+              {/each}
+            </select>
+          </div>
+        {/if}
+
         <label class="toggle-row">
           <span>
-            <strong>Mostrar cabecera</strong>
-            <small>Versión básica: título de sección o del libro.</small>
+            <strong>Mostrar cabecera (titulillo)</strong>
+            <small>Texto pequeño en el margen superior. No aparece en aperturas ni páginas a sangre.</small>
           </span>
           <input type="checkbox" bind:checked={showHeader} />
+        </label>
+
+        {#if showHeader}
+          <div class="field">
+            <label for="header-content">Contenido de la cabecera</label>
+            <select id="header-content" class="input" bind:value={headerContent}>
+              {#each HEADER_CONTENTS as c}
+                <option value={c}>{headerContentLabel(c)}</option>
+              {/each}
+            </select>
+          </div>
+          <div class="field">
+            <label for="header-pos">Posición de la cabecera</label>
+            <select id="header-pos" class="input" bind:value={headerPosition}>
+              {#each FURNITURE_POSITIONS as p}
+                <option value={p}>{positionLabel(p)}</option>
+              {/each}
+            </select>
+          </div>
+          <label class="toggle-row">
+            <span>
+              <strong>Cabecera en mayúsculas espaciadas</strong>
+              <small>Estilo clásico de titulillo.</small>
+            </span>
+            <input type="checkbox" bind:checked={headerUppercase} />
+          </label>
+        {/if}
+      </section>
+
+      <section class="panel">
+        <h2 class="panel-title">Tipografía</h2>
+        <label class="toggle-row">
+          <span>
+            <strong>Guionización automática (español)</strong>
+            <small>Parte palabras con guion al final de línea según las reglas del español. Reduce los huecos del texto justificado. Afecta a vista previa y PDF.</small>
+          </span>
+          <input type="checkbox" bind:checked={hyphenate} />
         </label>
       </section>
 

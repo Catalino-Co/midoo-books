@@ -60,6 +60,7 @@ export function rowToLayoutSettings(row: Record<string, SqlValue>): LayoutSettin
       row.hide_number_on_section_types ?? DEFAULT_LAYOUT_SETTINGS.hideNumberOnSectionTypes,
     ),
     showHeader:               Number(row.show_header ?? (DEFAULT_LAYOUT_SETTINGS.showHeader ? 1 : 0)) === 1,
+    hyphenate:                Number(row.hyphenate ?? 0) === 1,
     showFooter:               Number(row.show_footer ?? (DEFAULT_LAYOUT_SETTINGS.showFooter ? 1 : 0)) === 1,
     headerConfigJson:         row.header_config_json != null ? String(row.header_config_json) : null,
     footerConfigJson:         row.footer_config_json != null ? String(row.footer_config_json) : null,

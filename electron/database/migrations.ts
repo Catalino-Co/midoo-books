@@ -785,6 +785,20 @@ const migrations: Migration[] = [
     },
   },
 
+  // ── v13: guionización automática por libro ─────────────────────────────────
+  {
+    version: 13,
+    name: 'layout_hyphenate',
+    up: (db) => {
+      db.run(`ALTER TABLE layout_settings ADD COLUMN hyphenate INTEGER NOT NULL DEFAULT 0`);
+      db.run(`
+        INSERT OR REPLACE INTO app_settings (key, value) VALUES
+          ('schemaVersion', '13')
+      `);
+      console.log('[DB] v13: layout_settings — hyphenate.');
+    },
+  },
+
 ];
 
 /**

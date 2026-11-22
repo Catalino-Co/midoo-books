@@ -21,6 +21,15 @@ export type ChapterOpeningTextAlign = (typeof CHAPTER_OPENING_TEXT_ALIGN_VALUES)
 export const CHAPTER_OPENING_TEXT_COLOR_MODE_VALUES = ['light', 'dark', 'auto'] as const;
 export type ChapterOpeningTextColorMode = (typeof CHAPTER_OPENING_TEXT_COLOR_MODE_VALUES)[number];
 
+/**
+ * Dónde se coloca la página de apertura:
+ *   - 'next'  → página siguiente (sea par o impar).
+ *   - 'left'  → página par (izquierda, verso): queda enfrente del inicio del texto.
+ *   - 'right' → página impar (derecha, recto).
+ */
+export const CHAPTER_OPENING_START_ON_VALUES = ['next', 'left', 'right'] as const;
+export type ChapterOpeningStartOn = (typeof CHAPTER_OPENING_START_ON_VALUES)[number];
+
 export interface ChapterOpeningBlockContent {
   chapterLabel: string;
   title: string;
@@ -30,6 +39,10 @@ export interface ChapterOpeningBlockContent {
   overlay: boolean;
   /** Contraste del texto sobre la imagen (maquetación futura). */
   textColorMode: ChapterOpeningTextColorMode;
+  /** true = la ilustración llega hasta el borde de la hoja (ignora márgenes). */
+  bleed: boolean;
+  /** Lado de la página de apertura. */
+  startOn: ChapterOpeningStartOn;
 }
 
 export const EMPTY_CHAPTER_OPENING_CONTENT: ChapterOpeningBlockContent = {
@@ -40,6 +53,9 @@ export const EMPTY_CHAPTER_OPENING_CONTENT: ChapterOpeningBlockContent = {
   textAlign: 'left',
   overlay: true,
   textColorMode: 'light',
+  // Las aperturas nuevas nacen a sangre; las existentes sin el campo se leen como false.
+  bleed: true,
+  startOn: 'next',
 };
 
 function isPosition(v: unknown): v is ChapterOpeningTextPosition {
@@ -74,6 +90,11 @@ export function parseChapterOpeningContent(contentJson: string | null): ChapterO
     const textColorMode = isColorMode(o.textColorMode)
       ? o.textColorMode
       : EMPTY_CHAPTER_OPENING_CONTENT.textColorMode;
+    const bleed = o.bleed === true;
+    const startOn: ChapterOpeningStartOn = typeof o.startOn === 'string'
+      && (CHAPTER_OPENING_START_ON_VALUES as readonly string[]).includes(o.startOn)
+      ? o.startOn as ChapterOpeningStartOn
+      : 'next';
     return {
       chapterLabel,
       title,
@@ -82,6 +103,8 @@ export function parseChapterOpeningContent(contentJson: string | null): ChapterO
       textAlign,
       overlay,
       textColorMode,
+      bleed,
+      startOn,
     };
   } catch {
     return { ...EMPTY_CHAPTER_OPENING_CONTENT };
@@ -97,7 +120,17 @@ export function serializeChapterOpeningContent(c: ChapterOpeningBlockContent): s
     textAlign: c.textAlign,
     overlay: c.overlay,
     textColorMode: c.textColorMode,
+    bleed: c.bleed === true,
+    startOn: c.startOn ?? 'next',
   });
+}
+
+export function chapterOpeningStartOnLabel(v: ChapterOpeningStartOn): string {
+  switch (v) {
+    case 'left':  return 'Página par (izquierda, frente al texto)';
+    case 'right': return 'Página impar (derecha)';
+    default:      return 'Página siguiente';
+  }
 }
 
 /** Clases para preview en lista / inspector (sin lógica de maquetación paginada). */

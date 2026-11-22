@@ -18,8 +18,7 @@ import { buildBookStyleCss, type BookStyleDefinition } from './book-styles';
 /** Fuente por defecto del libro si LayoutSettings.bodyFontFamily está vacío. */
 export const DEFAULT_BOOK_FONT_STACK = "Georgia, 'Times New Roman', serif";
 
-/** Altura fija (px a 96 dpi) del bloque SEPARATOR: línea centrada en este alto. */
-export const SEPARATOR_BLOCK_HEIGHT_PX = 24;
+/** El alto del bloque SEPARATOR depende del ornamento: ver separatorHeightPx() en separator-content.ts. */
 
 /** Margen vertical (pt) por encima y por debajo de una imagen en el flujo. */
 export const IMAGE_BLOCK_MARGIN_PT = 6;
@@ -45,7 +44,9 @@ const TEXT_BASE_CSS = [
   'white-space:pre-wrap',
   'overflow-wrap:normal',
   'word-break:normal',
-  'hyphens:none',
+  // manual: solo parte en guiones blandos (U+00AD) insertados por hyphenation.ts.
+  // Sin guionización activada el texto no los lleva y el efecto es el de «none».
+  'hyphens:manual',
 ].join(';');
 
 /** Reglas propias del tipo de bloque (padding, estilo) que afectan a la altura. */
