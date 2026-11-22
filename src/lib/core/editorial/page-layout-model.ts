@@ -35,6 +35,10 @@ export interface PlacedBlock {
   fullPageComposition?: boolean;
   /** Caja calculada por el motor para bloques IMAGE en el flujo (no fillPage). */
   imageBox?: PlacedImageBox;
+  /** Bloque anclado al pie de la caja de texto (block-placement.ts). */
+  anchorBottom?: boolean;
+  /** Imagen de portada/contraportada usada como fondo a sangre (no ocupa flujo). */
+  coverBackdrop?: boolean;
   tocEntries?: TocEntry[];
   tocConfig?: TocConfig;
   syntheticType?: 'TOC';
@@ -71,6 +75,8 @@ export interface RenderedPage {
   primarySectionId: string | null;
   primarySectionType: SectionType | null;
   primarySectionTitle: string | null;
+  /** settingsJson de esa sección (fondo y tono de texto: page-decoration.ts). */
+  primarySectionSettingsJson?: string | null;
   placements: PlacedBlock[];
   /** Notas para depuración (saltos forzados, desbordes, etc.). */
   debugNotes: string[];

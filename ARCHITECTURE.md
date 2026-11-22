@@ -264,7 +264,8 @@ Los estilos viven en `layout_settings.styles_json` como un `BookStyleMap` JSON s
 ### Roles tipográficos (`BookStyleRole`)
 `TITLE`, `HEADING_1`, `HEADING_2`, `HEADING_3`, `HEADING_4`,
 `PARAGRAPH`, `QUOTE`, `CENTERED_PHRASE`, `TOC_ENTRY`,
-`CHAPTER_OPENING_LABEL`, `CHAPTER_OPENING_TITLE`
+`CHAPTER_OPENING_LABEL`, `CHAPTER_OPENING_TITLE`,
+`BADGE` (Etiqueta «Día N»), `VERSE_TEXT` y `VERSE_REFERENCE` (Cita bíblica)
 
 ### Propiedades por rol (`BookStyleDefinition`)
 
@@ -299,13 +300,18 @@ El motor (`page-layout-engine.ts`) es TypeScript puro. En el navegador **1 unida
 - Cabecera y folio se dibujan dentro de los márgenes y no restan alto a la caja de texto.
 - Huérfanas: mínimo 2 líneas de párrafo al pie y 2 al inicio de página.
 - Una imagen que no cabe pasa a la página siguiente, salvo que reducida a ≥ 80 % de su alto quepa en el hueco.
+- La caja de texto (`.bp-box`) es una columna flex; los bloques no encogen (`flex-shrink: 0`). Un espaciador con `margin-top: auto` antes del primer bloque anclado lo empuja al pie de la caja.
+- Etiqueta (`BADGE`) y Cita bíblica (`VERSE`) se pintan con el HTML de `composite-blocks.ts` (CSS en línea) y el motor mide ese mismo HTML (`measureHtml`).
 - Guionización: con `LayoutSettings.hyphenate` el motor inserta guiones blandos (U+00AD, patrones de español del paquete `hyphen`) en párrafos, citas y frases centradas ANTES de medir. El CSS usa `hyphens: manual`, así la partición es la misma en todos los sistemas. Si un párrafo se corta en mitad de palabra, el fragmento termina con un guion visible.
 
 ### Reglas especiales de paginación
 - `PAGE_BREAK` → nueva página inmediata
 - `CHAPTER_OPENING`, `TITLE_PAGE` → página dedicada (nueva página antes y después)
 - `IMAGE` con `fillPage: true` → página dedicada (ocupa la caja de texto)
-- `IMAGE` en sección `COVER` → hoja completa a sangre
+- `IMAGE` en sección `COVER` o `BACK_COVER` → fondo a sangre de la página (`coverBackdrop`, 0 unidades de flujo): los textos de la sección se componen encima
+- Bloque con «Anclar al pie» (`metadataJson.placement.anchor = 'bottom'`, `block-placement.ts`) → se coloca al final de la caja de texto; lo siguiente empieza en página nueva. No se parte (un párrafo anclado va entero)
+- `BADGE` → como un título: no se queda solo al pie (keep-with-next). «{n}» en su texto se sustituye por 1, 2, 3… en orden de lectura antes de medir (`applyBadgeNumbering`; también en EPUB/DOCX/Markdown)
+- Una sección nueva reutiliza la página vacía que dejó abierta una portadilla o apertura (no crea un blanco de más)
 - `IMAGE` con `fillPage` + `bleed` → hoja completa a sangre
 - `CHAPTER_OPENING` con `bleed` → ilustración a sangre; el texto superpuesto queda dentro de la caja de texto
 - `CHAPTER_OPENING.startOn` = `left` | `right` → la apertura cae en página par/impar (se inserta un blanco si hace falta). Si es el primer bloque de la sección, manda sobre «Iniciar en página derecha»
@@ -315,7 +321,16 @@ El motor (`page-layout-engine.ts`) es TypeScript puro. En el navegador **1 unida
 ### Cabecera y folio (`page-furniture.ts`)
 - `footerConfigJson`: `folioStyle` (`plain` 7 · `dashes` — 7 — · `dots` · 7 · · `brackets` [ 7 ]) y `position` (`center` | `outside`).
 - `headerConfigJson`: `content` (`section` | `book` | `alternate`: libro en pares, capítulo en impares), `position`, `uppercase`.
+- `footerConfigJson.ornament` (`none` | `laurel` | `flourish` | `diamond` | `asterism` | `dots`): ornamento centrado en el pie de cada página de texto (no en portada, contraportada ni blancos). Con folio, el número baja bajo el ornamento. Va en `PageEditorialFrame.footerOrnament`.
 - No se dibujan en páginas de composición completa (aperturas, imágenes a página completa, portada).
+
+### Fondo de página y ajustes por sección (`page-decoration.ts`)
+- `layout_settings.page_background_json` (migración v14): `kind` = `none` | `paper` (color) | `grid` (papel con cuadrícula vectorial de 5 mm) | `image` (asset del libro), `color`, `assetId`, `opacity`, `skipFullPage`.
+- Se dibuja debajo de todo y a sangre (`.bp-pagebg`), también en blancos editoriales. No afecta a la paginación ni se exporta al EPUB.
+- `DocumentSection.settingsJson`: `pageBackground: 'none'` quita el fondo en esa sección; `textTone: 'light'` pone el texto claro con sombra suave (portadas sobre imagen oscura). `RenderedPage.primarySectionSettingsJson` lo lleva hasta `BookPage`.
+
+### Plantillas (`book-templates.ts`)
+- «Novela ilustrada» y «Devocional»: maqueta + estilos (`layout()`) y esqueleto de secciones/bloques (`scaffold()`). `book-templates.service.ts` las aplica con los servicios normales: al crear un libro (diseño + contenido) o desde Maqueta (solo diseño).
 
 ### PDF de impresión con sangrado
 Con `bleedMm` > 0 y formato `print`, cada hoja del PDF mide `ancho + sangrado` × `alto + 2 × sangrado` (sangrado por el corte exterior, arriba y abajo; el lomo no lleva). Es la convención de KDP e IngramSpark para interiores. Las capas a sangre de `BookPage` se extienden por esa zona; el resto del contenido conserva su posición respecto al corte. El PDF de pantalla siempre sale al tamaño de corte.
@@ -331,7 +346,7 @@ Con `bleedMm` > 0 y formato `print`, cada hoja del PDF mide `ancho + sangrado` �
 |---|---|---|
 | **PDF Pantalla** | `printToPDF` + BrowserWindow oculto | Dimensiones configuradas por CSS `@page`, RGB, optimizado para pantalla |
 | **PDF Impresión** | `printToPDF` + BrowserWindow oculto | Mismo motor, orientado a formato físico del libro |
-| **EPUB** | `jszip` | EPUB 3 reflowable con NCX EPUB 2. TOC navegable, imágenes (incluida la de apertura de capítulo) y fuentes propias embebidas |
+| **EPUB** | `jszip` | EPUB 3 reflowable con NCX EPUB 2. TOC navegable, imágenes (incluida la de apertura de capítulo) y fuentes propias embebidas. Etiquetas y citas bíblicas con clases `.badge` / `.verse` |
 | **DOCX** | `docx` | Word compatible. Estilos de párrafo, headings, imágenes embebidas |
 | **Markdown** | Serialización pura JS | Frontmatter YAML, un archivo con todas las secciones |
 
@@ -446,7 +461,7 @@ Estas reglas son **no negociables**.
 
 **Fase A — Diseño de página avanzado**
 - Opción C ampliada: plantillas de sección con slots de posición libre (libre-canvas ligero)
-- Soporte de imágenes de fondo por sección (no solo CHAPTER_OPENING)
+- Fondo de imagen distinto por sección (hoy: fondo del libro + quitarlo por sección)
 - Marcas de corte y PDF/X para imprenta tradicional (el sangrado ya está en el PDF de impresión)
 
 **Fase B — Distribución multiplataforma**
@@ -461,7 +476,7 @@ Estas reglas son **no negociables**.
 - Modo web (SvelteKit puro con File System Access API para demo/colaboración)
 
 **Fase D — Capacidades editoriales avanzadas**
-- Sistema de plantillas de libro reutilizables
+- Plantillas guardadas por el usuario (hoy: «Novela ilustrada» y «Devocional» integradas)
 - Estilos de párrafo adicionales: letra capital, verso/poesía, nota al pie
 - Generación de ISBN/barcode embebible en contraportada
 - Preflight report para PDF de imprenta
@@ -473,9 +488,9 @@ Estas reglas son **no negociables**.
 | Módulo | Estado | Notas |
 |---|---|---|
 | Electron + SvelteKit | ✅ Funcionando | Puerto 5178, build con esbuild |
-| sql.js SQLite | ✅ Funcionando | Migraciones v1–v11 |
+| sql.js SQLite | ✅ Funcionando | Migraciones v1–v14 |
 | Biblioteca (CRUD libros) | ✅ Funcionando | |
-| Editor de contenido | ✅ Funcionando | 13 tipos de bloque |
+| Editor de contenido | ✅ Funcionando | 14 tipos de bloque (incl. Etiqueta y Cita bíblica) |
 | Assets | ✅ Funcionando | Protocolo midoo-media:// |
 | Estilos editoriales | ✅ Funcionando | fontFamily, textTransform incluidos |
 | Maqueta (layout) | ✅ Funcionando | Preset A5/Trade/Carta/A4 + personalizado |
@@ -487,4 +502,4 @@ Estas reglas son **no negociables**.
 | Bloque TITLE_PAGE | ✅ Funcionando | 5 slots posicionados |
 | Mac / Linux builds | ❌ Pendiente | Fase B |
 | Auto-update | ❌ Pendiente | Fase B |
-| Plantillas reutilizables | ❌ Pendiente | Fase D |
+| Plantillas de libro | ✅ Funcionando | Novela ilustrada y Devocional (al crear o desde Maqueta) |

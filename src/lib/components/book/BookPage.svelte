@@ -22,6 +22,12 @@
    *     de capítulo con sangre) se dibujan sobre la hoja, no en la caja de texto. Con
    *     `bleedMm` > 0 (PDF de imprenta) se extienden también por el sangrado exterior,
    *     superior e inferior; el lado del lomo nunca lleva sangrado.
+   *   - El fondo de página (papel, cuadrícula o textura) va debajo de todo, a sangre.
+   *   - La caja de texto es una columna flex: los bloques «anclados al pie» llevan
+   *     margin-top:auto y quedan pegados al final de la caja. Los bloques no encogen
+   *     (flex-shrink:0), así que las alturas son las mismas que midió el motor.
+   *   - Etiqueta y Cita bíblica se pintan con el HTML de composite-blocks.ts, el mismo
+   *     que mide el motor.
    */
   import type { PaginatedBookResult, PlacedBlock, RenderedPage } from '$lib/core/editorial/page-layout-model';
   import type { Asset } from '$lib/core/domain/asset';
@@ -50,6 +56,12 @@
     separatorHeightPx,
     separatorOrnamentSvg,
   } from '$lib/core/editorial/separator-content';
+  import { compositeBlockHtml, isCompositeBlockType } from '$lib/core/editorial/composite-blocks';
+  import {
+    gridBackgroundSvg,
+    parsePageBackground,
+    parseSectionDecoration,
+  } from '$lib/core/editorial/page-decoration';
   import {
     parseImageBlockContent,
     parseChapterOpeningContent,
@@ -119,9 +131,22 @@
     return buildBookStyleCss({ ...style, textAlign }, { includeMargins: false });
   }
 
-  /** Imagen de portada (sección COVER): ocupa la hoja entera, a sangre. */
+  /** Imagen de portada / contraportada: fondo de la hoja entera, a sangre. */
   function isCoverImage(pl: PlacedBlock): boolean {
-    return pl.block?.blockType === 'IMAGE' && page.primarySectionType === 'COVER';
+    if (pl.coverBackdrop) return true;
+    return pl.block?.blockType === 'IMAGE'
+      && (page.primarySectionType === 'COVER' || page.primarySectionType === 'BACK_COVER');
+  }
+
+  /** HTML de Etiqueta / Cita bíblica con el estilo efectivo (igual que el motor). */
+  function compositeHtml(pl: PlacedBlock): string {
+    if (!pl.block) return '';
+    const style = resolveEffectiveBookStyleForBlock(
+      settings,
+      page.primarySectionType ? { sectionType: page.primarySectionType } : null,
+      pl.block,
+    ) ?? (pl.block.blockType === 'BADGE' ? bookStyles.BADGE : bookStyles.VERSE_TEXT);
+    return compositeBlockHtml(pl.block, style, bookStyles) ?? '';
   }
 
   /** Colocación que se dibuja a sangre, sobre la hoja completa. */
@@ -149,6 +174,8 @@
 
   let bleedPlacements = $derived(page.placements.filter(isBleedPlacement));
   let flowPlacements  = $derived(page.placements.filter(pl => !isBleedPlacement(pl)));
+  /** Índice (en flowPlacements) del primer bloque anclado al pie: lleva margin-top:auto. */
+  let firstAnchoredIdx = $derived(flowPlacements.findIndex(pl => pl.anchorBottom));
 
   /** Sangrado real solo al imprimir. */
   let bleed = $derived(mode === 'print' ? Math.max(0, bleedMm) : 0);
@@ -164,11 +191,23 @@
       pl.fullPageComposition || isCoverImage(pl) || isFillPageImage(pl)),
   );
 
+  // ── Fondo de página y tono de la sección ──
+  let pageBg     = $derived(parsePageBackground(settings.pageBackgroundJson));
+  let sectionDec = $derived(parseSectionDecoration({ settingsJson: page.primarySectionSettingsJson ?? null }));
+  let showPageBg = $derived(
+    pageBg.kind !== 'none'
+    && sectionDec.background !== 'none'
+    && !(pageBg.skipFullPage && fullPage)
+    && (pageBg.kind !== 'image' || !!assetUrlFor(pageBg.assetId)),
+  );
+  let lightText = $derived(sectionDec.textTone === 'light');
+
   let pageStyle = $derived([
     `width:${frame.pageWidthMm}mm`,
     `height:${frame.pageHeightMm}mm`,
     `font-family:${baseFont}`,
-  ].join(';'));
+    lightText ? 'color:#fbf8f2' : '',
+  ].filter(Boolean).join(';'));
 
   let boxStyle = $derived([
     `top:${frame.box.topMm}mm`,
@@ -216,6 +255,8 @@
     headerCfg.uppercase ? 'text-transform:uppercase;letter-spacing:0.12em;font-size:7pt' : '',
   ].filter(Boolean).join(';'));
 
+  let footerOrnament = $derived(fullPage ? null : (page.editorial.footerOrnament ?? null));
+
   let footerStyle = $derived([
     `bottom:${frame.footerCenterFromBottomMm}mm`,
     `left:${frame.marginLeftMm}mm`,
@@ -240,6 +281,15 @@
   style={pageStyle}
   data-page={page.physicalPageNumber}
 >
+  {#if showPageBg}
+    <div class="bp-pagebg" style="{bleedStyle};{pageBg.kind !== 'image' ? `background:${pageBg.color}` : ''}" aria-hidden="true">
+      {#if pageBg.kind === 'grid'}
+        {@html gridBackgroundSvg(frame.pageWidthMm + bleed, frame.pageHeightMm + bleed * 2, pageBg.opacity)}
+      {:else if pageBg.kind === 'image'}
+        <img class="bp-pagebg__img" src={assetUrlFor(pageBg.assetId)} alt="" style="opacity:{pageBg.opacity}" />
+      {/if}
+    </div>
+  {/if}
   {#if page.kind === 'editorial_blank'}
     {#if mode === 'preview'}
       <p class="bp-blank-hint">Página en blanco<br /><span>({blankReason})</span></p>
@@ -275,7 +325,7 @@
           {#if url}
             <img class="bp-fill-img" src={url} alt={im.altText || ''} />
           {:else if mode === 'preview'}
-            <div class="img-ph img-ph--full">Sin imagen</div>
+            <div class="img-ph img-ph--full" class:img-ph--dark={lightText}>Sin imagen</div>
           {/if}
         {/if}
       </div>
@@ -285,8 +335,12 @@
       <div class="bp-running-head" style={headerStyle}>{page.editorial.headerText}</div>
     {/if}
 
-    <div class="bp-box" style={boxStyle}>
+    <div class="bp-box" class:bp-box--light={lightText} style={boxStyle}>
       {#each flowPlacements as pl, pi (`${pl.block?.id ?? pl.syntheticType ?? 'syn'}-${pi}-${pl.textOverride ?? ''}`)}
+        {#if pi === firstAnchoredIdx}
+          <!-- Empuja los bloques anclados al pie de la caja de texto -->
+          <div class="bp-anchor-spacer" aria-hidden="true"></div>
+        {/if}
         {#if pl.syntheticType === 'TOC'}
           <div class="bp-block">
             <section class="toc">
@@ -403,6 +457,9 @@
         {:else if pl.block?.blockType === 'PAGE_BREAK'}
           <!-- salto de página explícito: ya es página separada -->
 
+        {:else if pl.block && isCompositeBlockType(pl.block.blockType)}
+          <div class="bp-block">{@html compositeHtml(pl)}</div>
+
         {:else if pl.block && isTextBlock(pl)}
           <div class="bp-block">
             <svelte:element this={textBlockTag(pl.block.blockType)} style={textCss(pl)}>{bodyText(pl)}</svelte:element>
@@ -417,8 +474,19 @@
       {/each}
     </div>
 
+    {#if footerOrnament}
+      <div
+        class="bp-foot-orn"
+        style="bottom:{frame.footerCenterFromBottomMm}mm;left:{frame.marginLeftMm}mm;right:{frame.marginRightMm}mm"
+        aria-hidden="true"
+      >{@html separatorOrnamentSvg(footerOrnament)}</div>
+    {/if}
     {#if page.editorial.footerText && !fullPage}
-      <div class="bp-folio" style={footerStyle}>{page.editorial.footerText}</div>
+      <!-- Con ornamento en el pie, el folio baja bajo el ornamento -->
+      <div
+        class="bp-folio"
+        style="{footerStyle}{footerOrnament ? `;bottom:${Math.max(2, frame.footerCenterFromBottomMm - 4.4)}mm` : ''}"
+      >{page.editorial.footerText}</div>
     {/if}
 
     {#if mode === 'preview' && showGuides}
@@ -451,11 +519,21 @@
   .bp-box {
     position: absolute;
     box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+  }
+  .bp-box--light {
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  }
+  .bp-anchor-spacer {
+    margin-top: auto;
+    flex: 0 0 0;
   }
 
   /* Envoltorio de cada bloque: BFC para que los márgenes no colapsen (ver cabecera). */
   .bp-block {
     display: flow-root;
+    flex-shrink: 0;
   }
   .bp-block--full {
     height: 100%;
@@ -476,6 +554,35 @@
   }
   .bp-running-head { transform: translateY(-50%); }
   .bp-folio        { transform: translateY(50%); }
+
+  /* Ornamento del pie (laurel, floritura…), centrado en el margen inferior */
+  .bp-foot-orn {
+    position: absolute;
+    display: flex;
+    justify-content: center;
+    transform: translateY(50%);
+    color: #3b2f22;
+    pointer-events: none;
+  }
+  .bp-foot-orn :global(svg) {
+    display: block;
+    height: 5.2mm;
+    width: auto;
+  }
+
+  /* Fondo de página: debajo de todo, a sangre */
+  .bp-pagebg {
+    position: absolute;
+    overflow: hidden;
+    z-index: 0;
+    pointer-events: none;
+  }
+  .bp-pagebg__img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
 
   /* ── Imágenes ── */
   /* La figura ocupa todo el ancho de la columna (igual que al medir el pie);
@@ -501,6 +608,7 @@
   }
   .img-ph--print { background: transparent; }
   .img-ph--full { height: 100%; }
+  .img-ph--dark { background: #34343e; color: rgba(255, 255, 255, 0.4); }
   .bp-fill-img {
     display: block;
     width: 100%;

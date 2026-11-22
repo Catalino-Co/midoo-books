@@ -41,7 +41,7 @@ describe('folio y cabecera', () => {
   });
 
   it('configuración vacía o inválida → valores por defecto', () => {
-    expect(parseFooterConfig(null)).toEqual({ folioStyle: 'plain', position: 'center' });
+    expect(parseFooterConfig(null)).toEqual({ folioStyle: 'plain', position: 'center', ornament: 'none' });
     expect(parseFooterConfig('{"folioStyle":"raro"}').folioStyle).toBe('plain');
   });
 });

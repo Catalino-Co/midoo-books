@@ -49,6 +49,11 @@ const TEXT_BASE_CSS = [
   'hyphens:manual',
 ].join(';');
 
+/** Reglas base de texto (para bloques compuestos que montan su propio HTML). */
+export function textBaseCss(): string {
+  return TEXT_BASE_CSS;
+}
+
 /** Reglas propias del tipo de bloque (padding, estilo) que afectan a la altura. */
 function blockTypeCss(blockType: DocumentBlock['blockType'] | 'CAPTION'): string {
   switch (blockType) {

@@ -15,6 +15,8 @@ import { DEFAULT_LAYOUT_SETTINGS } from '$lib/core/domain/layout';
 import { parseImageBlockContent } from './image-block-content';
 import { parseChapterOpeningContent } from './chapter-opening-content';
 import { hyphenateBlock } from './hyphenation';
+import { isBlockAnchoredBottom } from './block-placement';
+import { applyBadgeNumbering, compositeBlockHtml } from './composite-blocks';
 import type {
   AssetDimensions,
   BookLayoutSnapshot,
@@ -110,6 +112,8 @@ export interface LayoutTextMeasurementAdapter {
   }): MeasuredParagraphSplit | null;
   /** Alto (unidades) de un pie de imagen con el CSS compartido. Opcional. */
   measureCaption?(text: string): number;
+  /** Alto (unidades) de un bloque compuesto (composite-blocks.ts) dentro de flow-root. Opcional. */
+  measureHtml?(html: string): number;
 }
 
 const MM_PER_PT = 25.4 / 72;
@@ -278,6 +282,8 @@ class Paginator {
   private currentIdx = 0;
   private used = 0;
   private forceNext = false;
+  /** La página actual ya tiene un bloque anclado al pie: lo siguiente va a otra página. */
+  private anchoredOnPage = false;
 
   constructor(
     bookId: string,
@@ -370,6 +376,7 @@ class Paginator {
       primarySectionId:   null,
       primarySectionType: null,
       primarySectionTitle: null,
+      primarySectionSettingsJson: null,
       placements:         [],
       debugNotes:         [],
       layoutMeta: {
@@ -392,6 +399,7 @@ class Paginator {
     this.pages.push(this.makePage('content'));
     this.currentIdx = this.pages.length - 1;
     this.used = 0;
+    this.anchoredOnPage = false;
   }
 
   private appendBlankPage(note: string): void {
@@ -400,6 +408,7 @@ class Paginator {
     this.pages.push(p);
     this.currentIdx = this.pages.length - 1;
     this.used = 0;
+    this.anchoredOnPage = false;
   }
 
   private touchPrimarySection(section: DocumentSection): void {
@@ -408,6 +417,7 @@ class Paginator {
       p.primarySectionId    = section.id;
       p.primarySectionType  = section.sectionType;
       p.primarySectionTitle = section.title;
+      p.primarySectionSettingsJson = section.settingsJson ?? null;
     }
   }
 
@@ -469,7 +479,32 @@ class Paginator {
     });
   }
 
+  /** Alto de una Etiqueta o Cita bíblica: medido en el navegador o estimado. */
+  private compositeBlockUnits(block: DocumentBlock, section: DocumentSection): number {
+    const style = this.effectiveStyle(section, block)
+      ?? (block.blockType === 'BADGE' ? this.bookStyles.BADGE : this.bookStyles.VERSE_TEXT);
+    if (this.textMeasurement?.measureHtml) {
+      const html = compositeBlockHtml(block, style, this.bookStyles);
+      if (html) return this.textMeasurement.measureHtml(html);
+    }
+    const lineUnits = (s: BookStyleDefinition) => this.ptToUnits(s.fontSize * s.lineHeight);
+    if (block.blockType === 'BADGE') {
+      return Math.ceil(lineUnits(style) * 1.7 + this.ptToUnits(style.marginTop + style.marginBottom));
+    }
+    const chars = charsPerLineForStyle(this.metrics.charsPerLine, style, this.bookStyles.PARAGRAPH);
+    const textLines = block.contentText.trim() ? totalLinesForText(block.contentText, chars) : 0;
+    const ref = this.bookStyles.VERSE_REFERENCE;
+    return Math.ceil(
+      textLines * lineUnits(style)
+      + lineUnits(ref)
+      + this.ptToUnits(16) + 2 * 3.4 * this.unitsPerMm() + this.ptToUnits(6),
+    );
+  }
+
   private estimateBlockHeightForPlacement(block: DocumentBlock, section: DocumentSection): number {
+    if (block.blockType === 'BADGE' || block.blockType === 'VERSE') {
+      return this.compositeBlockUnits(block, section);
+    }
     const measured = this.measureTextBlockUnits(block, section, block.contentText, {
       continuedFromPreviousPage: false,
       continuesOnNextPage: false,
@@ -549,6 +584,7 @@ class Paginator {
         p.primarySectionId    = null;
         p.primarySectionType  = null;
         p.primarySectionTitle = null;
+        p.primarySectionSettingsJson = null;
         p.debugNotes.push(note);
         this.appendContentPage();
       } else {
@@ -568,8 +604,11 @@ class Paginator {
     if (sectionStartsOnFreshPage(section.sectionType, isFirst)) {
       if (this.used > 0) {
         this.startNewContentPage(`Inicio de sección: ${section.sectionType}`);
-      } else if (!isFirst) {
+      } else if (!isFirst && this.pages[this.currentIdx].placements.length > 0) {
         // Nueva sección siempre en página nueva aunque la anterior acabara justo al filo
+        // (p. ej. una portada cuya imagen de fondo no ocupa flujo). Si la página actual
+        // está vacía —la dejó abierta una portadilla o apertura— se reutiliza: así no
+        // aparece una página en blanco de más.
         this.startNewContentPage(`Nueva sección: ${section.sectionType}`);
       }
     }
@@ -685,7 +724,8 @@ class Paginator {
     section: DocumentSection,
     next: DocumentBlock | undefined,
   ): boolean {
-    if ((block.blockType !== 'HEADING_1' && block.blockType !== 'HEADING_2') || !next) return false;
+    if ((block.blockType !== 'HEADING_1' && block.blockType !== 'HEADING_2' && block.blockType !== 'BADGE') || !next) return false;
+    if (isBlockAnchoredBottom(block) || isBlockAnchoredBottom(next)) return false;
     if (this.used === 0) return false;
 
     const resolvedHeadingUnits = this.estimateBlockHeightForPlacement(block, section);
@@ -700,6 +740,7 @@ class Paginator {
     blockHeight: number,
   ): boolean {
     if (this.used === 0) return false;
+    if (isBlockAnchoredBottom(block)) return false;
     if (
       block.blockType !== 'QUOTE'
       && block.blockType !== 'CENTERED_PHRASE'
@@ -1016,6 +1057,11 @@ class Paginator {
       this.forceNext = false;
     }
 
+    const anchored = isBlockAnchoredBottom(block);
+    if (this.anchoredOnPage && !anchored && block.blockType !== 'PAGE_BREAK') {
+      this.startNewContentPage('Tras bloque anclado al pie');
+    }
+
     if (block.pageBreakBefore && this.used > 0) {
       this.startNewContentPage('pageBreakBefore en bloque');
     }
@@ -1063,6 +1109,14 @@ class Paginator {
 
     if (block.blockType === 'IMAGE') {
       const img = parseImageBlockContent(block.contentJson);
+      if (!img.fillPage && (section.sectionType === 'COVER' || section.sectionType === 'BACK_COVER')) {
+        // Imagen de portada / contraportada: fondo a sangre de la página. No ocupa
+        // sitio en el flujo; los textos de la sección se componen encima.
+        const p = this.pages[this.currentIdx];
+        if (p.placements.some(x => x.coverBackdrop)) this.startNewContentPage('Otra imagen de portada');
+        this.placePlacement(section, { block, estimatedUnits: 0, coverBackdrop: true }, 0);
+        return;
+      }
       if (img.fillPage) {
         if (this.used > 0) this.startNewContentPage('IMAGE a página completa');
         const h = Math.min(
@@ -1079,7 +1133,7 @@ class Paginator {
       }
     }
 
-    if (block.blockType === 'PARAGRAPH') {
+    if (block.blockType === 'PARAGRAPH' && !anchored) {
       this.placeParagraphFlow(block, section);
       return;
     }
@@ -1122,6 +1176,7 @@ class Paginator {
       block,
       estimatedUnits: h,
       imageBox,
+      ...(anchored ? { anchorBottom: true } : {}),
       debugMeta: {
         fragmented: false,
         keepTogetherApplied: block.keepTogether,
@@ -1135,6 +1190,10 @@ class Paginator {
       },
     };
     this.placePlacement(section, placed, h);
+    if (anchored) {
+      this.anchoredOnPage = true;
+      this.pages[this.currentIdx].debugNotes.push(`${block.blockType} anclado al pie`);
+    }
 
     if (block.pageBreakAfter) {
       this.forceNext = true;
@@ -1234,6 +1293,11 @@ export function buildPaginatedLayout(
   snapshot: BookLayoutSnapshot,
   options: BuildPaginatedLayoutOptions = {},
 ): PaginatedBookResult {
+  // «Día {n}» → Día 1, Día 2… antes de medir (medición y render ven el mismo texto).
+  snapshot = {
+    ...snapshot,
+    blocksBySectionId: applyBadgeNumbering(snapshot.sections, snapshot.blocksBySectionId),
+  };
   if (snapshot.layoutSettings.hyphenate) {
     // Copia con guiones blandos en el texto corrido: medición y render parten igual.
     const blocksBySectionId: BookLayoutSnapshot['blocksBySectionId'] = {};

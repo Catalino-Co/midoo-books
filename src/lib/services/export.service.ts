@@ -23,6 +23,7 @@ import { bookToMarkdown }      from '$lib/core/editorial/blocks-to-markdown';
 import { resolveBookStyles }   from '$lib/core/editorial/book-styles';
 import { bookBaseFontFamily }  from '$lib/core/editorial/block-render-css';
 import { parseSeparatorContent, separatorTextGlyph } from '$lib/core/editorial/separator-content';
+import { applyBadgeNumbering, parseVerseContent } from '$lib/core/editorial/composite-blocks';
 
 // ─── Tipo agregado ────────────────────────────────────────────────────────────
 
@@ -54,7 +55,8 @@ export async function buildBookExportData(bookId: string): Promise<BookExportDat
     }),
   );
 
-  return { book, layout, sections, blocksBySectionId, assets };
+  // «Día {n}» → Día 1, Día 2… igual que en la vista previa.
+  return { book, layout, sections, blocksBySectionId: applyBadgeNumbering(sections, blocksBySectionId), assets };
 }
 
 // ─── CRUD de jobs ─────────────────────────────────────────────────────────────
@@ -172,6 +174,15 @@ function blocksToXhtml(
         break;
       }
       case 'PAGE_BREAK': lines.push('  <p class="page-break"/>'); break;
+      case 'BADGE': lines.push(`  <p class="badge"><span>${text}</span></p>`); break;
+      case 'VERSE': {
+        const v = parseVerseContent(b.contentJson);
+        lines.push('  <div class="verse">');
+        if ((b.contentText ?? '').trim()) lines.push(`    <p class="verse-text">${text}</p>`);
+        if (v.reference.trim()) lines.push(`    <p class="verse-ref">${xmlEsc(v.reference)}</p>`);
+        lines.push('  </div>');
+        break;
+      }
       case 'QUOTE': {
         const qlines = (b.contentText ?? '').split('\n');
         lines.push('  <blockquote>');
@@ -279,6 +290,11 @@ async function buildEpubZip(data: BookExportData, bookId: string): Promise<Uint8
     '.chapter-opening { margin: 0 0 1em; text-align: center; }',
     '.ornament { text-align: center; margin: 1em 0; letter-spacing: 0.2em; }',
     '.centered { text-align: center; }',
+    '.badge { text-align: center; margin: 0.5em 0 1.4em; }',
+    '.badge span { display: inline-block; padding: 0.25em 1.6em; border: 1px solid #4a3524; border-radius: 0.3em; background: #f3e3b5; font-weight: bold; }',
+    '.verse { text-align: center; margin: 2em auto 1.5em; padding: 0.6em 0; border-top: 1px solid #999; border-bottom: 1px solid #999; max-width: 70%; }',
+    '.verse-text { font-style: italic; margin: 0 0 0.3em; text-indent: 0; }',
+    '.verse-ref { font-weight: bold; margin: 0; text-indent: 0; }',
     '.chapter-label { text-align: center; font-size: 0.85em; letter-spacing: 0.1em; text-transform: uppercase; }',
     '.chapter-title { text-align: center; font-size: 1.8em; margin: 0.5em 0; }',
     '.chapter-subtitle { text-align: center; font-size: 1.1em; font-style: italic; }',
@@ -476,6 +492,33 @@ async function buildDocxBuffer(data: BookExportData): Promise<Uint8Array> {
             indent: { left: toTwips(10) },
           }));
           break;
+        case 'BADGE':
+          children.push(new Paragraph({
+            children: [new TextRun({ text, bold: true })],
+            alignment: AlignmentType.CENTER,
+            border: {
+              top:    { style: BorderStyle.SINGLE, size: 6, space: 2, color: '4A3524' },
+              bottom: { style: BorderStyle.SINGLE, size: 6, space: 2, color: '4A3524' },
+            },
+            spacing: { after: 240 },
+          }));
+          break;
+        case 'VERSE': {
+          const v = parseVerseContent(block.contentJson);
+          const runs = [] as InstanceType<typeof TextRun>[];
+          if (text.trim()) runs.push(new TextRun({ text, italics: true }));
+          if (v.reference.trim()) runs.push(new TextRun({ text: v.reference, bold: true, break: text.trim() ? 1 : 0 }));
+          children.push(new Paragraph({
+            children: runs,
+            alignment: AlignmentType.CENTER,
+            border: {
+              top:    { style: BorderStyle.SINGLE, size: 4, space: 4, color: '999999' },
+              bottom: { style: BorderStyle.SINGLE, size: 4, space: 4, color: '999999' },
+            },
+            spacing: { before: 240, after: 240 },
+          }));
+          break;
+        }
         case 'SEPARATOR':
           children.push(new Paragraph({
             children: [],

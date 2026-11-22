@@ -101,6 +101,21 @@
     SEPARATOR_ORNAMENTS,
     type SeparatorOrnament,
   } from '$lib/core/editorial/separator-content';
+  import {
+    BADGE_SHAPES,
+    DEFAULT_BADGE_CONTENT,
+    VERSE_FRAMES,
+    badgeShapeLabel,
+    parseBadgeContent,
+    parseVerseContent,
+    serializeBadgeContent,
+    serializeVerseContent,
+    verseFrameLabel,
+    type BadgeShape,
+    type VerseFrame,
+  } from '$lib/core/editorial/composite-blocks';
+  import { blockSupportsAnchor, mergeAnchorIntoMetadata, parseBlockAnchor } from '$lib/core/editorial/block-placement';
+  import { mergeSectionDecoration, parseSectionDecoration } from '$lib/core/editorial/page-decoration';
   import SectionTypeSelect from '$lib/components/SectionTypeSelect.svelte';
   import MarkdownImportUnifiedModal from '$lib/components/MarkdownImportUnifiedModal.svelte';
   import type {
@@ -270,6 +285,8 @@
       case 'IMAGE':           return '▣';
       case 'CHAPTER_OPENING': return '◈';
       case 'TITLE_PAGE':      return '◻';
+      case 'BADGE':           return '⬡';
+      case 'VERSE':           return '✠';
       default:                return '·';
     }
   }
@@ -294,6 +311,8 @@
       case 'HEADING_4': return 'Epígrafe o etiqueta';
       case 'QUOTE':     return 'Cita o texto destacado…';
       case 'CENTERED_PHRASE': return 'Frase centrada, dedicatoria…';
+      case 'BADGE':     return 'Día {n}';
+      case 'VERSE':     return 'Versículo (opcional): «Venid en pos de mí…»';
       default:          return '';
     }
   }
@@ -451,6 +470,8 @@
     { type: 'HEADING_4',       label: 'H4',  hint: 'Subtítulo 4' },
     { type: 'QUOTE',           label: '"',   hint: 'Cita' },
     { type: 'CENTERED_PHRASE', label: '⊙',  hint: 'Línea centrada' },
+    { type: 'BADGE',           label: '⬡',   hint: 'Etiqueta (Día N)' },
+    { type: 'VERSE',           label: '✠',   hint: 'Cita bíblica' },
     { type: 'SEPARATOR',       label: '—',   hint: 'Separador' },
     { type: 'PAGE_BREAK',      label: '↵',   hint: 'Salto de página' },
   ];
@@ -497,6 +518,8 @@
     'HEADING_2',
     'QUOTE',
     'CENTERED_PHRASE',
+    'BADGE',
+    'VERSE',
     'SEPARATOR',
     'PAGE_BREAK',
     'IMAGE',
@@ -513,6 +536,8 @@
     PAGE_BREAK:      ['salto', 'page', 'pagina', 'página'],
     IMAGE:           ['imagen', 'img', 'foto', 'figure'],
     CHAPTER_OPENING: ['apertura', 'co'],
+    BADGE:           ['etiqueta', 'dia', 'día', 'badge', 'leccion', 'lección'],
+    VERSE:           ['versiculo', 'versículo', 'biblia', 'referencia', 'cita biblica'],
   };
 
   function stripAccents(s: string): string {
@@ -598,6 +623,8 @@
   let insp_sType           = $state<SectionType>(DEFAULT_SECTION_TYPE);
   let insp_sIncludeToc     = $state(true);
   let insp_sStartRight     = $state(false);
+  let insp_sNoBackground   = $state(false);
+  let insp_sLightText      = $state(false);
 
   // Bloque
   let insp_bType           = $state<BlockType>(DEFAULT_BLOCK_TYPE);
@@ -619,6 +646,12 @@
   let insp_bImageWidthPercent = $state<number>(DEFAULT_IMAGE_WIDTH_PERCENT);
   let insp_bImageBleed     = $state(false);
   let insp_bSepOrnament    = $state<SeparatorOrnament>('line');
+  let insp_bBadgeShape     = $state<BadgeShape>(DEFAULT_BADGE_CONTENT.shape);
+  let insp_bBadgeFill      = $state(DEFAULT_BADGE_CONTENT.fill);
+  let insp_bBadgeStroke    = $state(DEFAULT_BADGE_CONTENT.stroke);
+  let insp_bVerseRef       = $state('');
+  let insp_bVerseFrame     = $state<VerseFrame>('ornament');
+  let insp_bAnchorBottom   = $state(false);
 
   let insp_bCoLabel          = $state('');
   let insp_bCoTitle          = $state('');
@@ -900,6 +933,9 @@
     insp_sType       = s.sectionType;
     insp_sIncludeToc = s.includeInToc;
     insp_sStartRight = s.startOnRightPage;
+    const deco = parseSectionDecoration(s);
+    insp_sNoBackground = deco.background === 'none';
+    insp_sLightText    = deco.textTone === 'light';
     resetInspectorDirty();
   }
 
@@ -934,6 +970,14 @@
     insp_bSepOrnament = block.blockType === 'SEPARATOR'
       ? parseSeparatorContent(block.contentJson).ornament
       : 'line';
+    const badge = parseBadgeContent(block.blockType === 'BADGE' ? block.contentJson : null);
+    insp_bBadgeShape  = badge.shape;
+    insp_bBadgeFill   = badge.fill;
+    insp_bBadgeStroke = badge.stroke;
+    const verse = parseVerseContent(block.blockType === 'VERSE' ? block.contentJson : null);
+    insp_bVerseRef    = verse.reference;
+    insp_bVerseFrame  = verse.frame;
+    insp_bAnchorBottom = parseBlockAnchor(block.metadataJson) === 'bottom';
     if (block.blockType === 'CHAPTER_OPENING') {
       const co = parseChapterOpeningContent(block.contentJson);
       insp_bCoLabel         = co.chapterLabel;
@@ -1017,6 +1061,10 @@
         sectionType:     insp_sType,
         includeInToc:    insp_sIncludeToc,
         startOnRightPage: insp_sStartRight,
+        settingsJson:    mergeSectionDecoration(
+          sections.find(s => s.id === selectedSectionId)?.settingsJson ?? null,
+          { background: insp_sNoBackground ? 'none' : 'inherit', textTone: insp_sLightText ? 'light' : 'default' },
+        ),
       });
       if (updated) {
         sections = sections.map(s => s.id === updated.id ? updated : s);
@@ -1042,11 +1090,14 @@
     inspectorDirty = false;
     try {
       const prev      = blocks.find(b => b.id === selectedBlockId);
-      const layoutMeta = mergeLayoutIntoMetadata(prev?.metadataJson ?? null, {
-        textAlign: insp_bTextAlign,
-        widthMode: insp_bWidthMode,
-        emphasis:  insp_bEmphasis,
-      });
+      const layoutMeta = mergeAnchorIntoMetadata(
+        mergeLayoutIntoMetadata(prev?.metadataJson ?? null, {
+          textAlign: insp_bTextAlign,
+          widthMode: insp_bWidthMode,
+          emphasis:  insp_bEmphasis,
+        }),
+        blockSupportsAnchor(insp_bType) && insp_bAnchorBottom ? 'bottom' : 'flow',
+      );
 
       let contentJsonPayload: string | null | undefined = undefined;
       if (insp_bType === 'IMAGE') {
@@ -1081,10 +1132,14 @@
         });
       } else if (insp_bType === 'SEPARATOR') {
         contentJsonPayload = serializeSeparatorContent({ ornament: insp_bSepOrnament });
+      } else if (insp_bType === 'BADGE') {
+        contentJsonPayload = serializeBadgeContent({ shape: insp_bBadgeShape, fill: insp_bBadgeFill, stroke: insp_bBadgeStroke });
+      } else if (insp_bType === 'VERSE') {
+        contentJsonPayload = serializeVerseContent({ reference: insp_bVerseRef, frame: insp_bVerseFrame });
       } else if (
         // El bloque cambió desde un tipo con content_json estructurado a uno sin él
         // (aquí insp_bType ya no es ninguno de esos tipos): limpiar el JSON.
-        prev && (['IMAGE', 'CHAPTER_OPENING', 'TITLE_PAGE', 'SEPARATOR'] as string[]).includes(prev.blockType)
+        prev && (['IMAGE', 'CHAPTER_OPENING', 'TITLE_PAGE', 'SEPARATOR', 'BADGE', 'VERSE'] as string[]).includes(prev.blockType)
       ) {
         contentJsonPayload = null;
       }
@@ -2192,6 +2247,14 @@
                       onblur={() => flushWriteBlockSave(block.id)}
                       onfocus={() => { selectedBlockId = block.id; showWriteInspector = false; }}
                     >{block.contentText}</textarea>
+                    {#if block.blockType === 'VERSE'}
+                      {@const vref = parseVerseContent(block.contentJson).reference.trim()}
+                      <button type="button" class="write-verse-ref" title="Editar referencia y filetes"
+                        onclick={() => openMediaBlockInWriteMode(block.id)}>{vref || 'Añadir referencia…'}</button>
+                    {:else if block.blockType === 'BADGE'}
+                      <button type="button" class="write-verse-ref write-verse-ref--badge" title="Marco y colores de la etiqueta"
+                        onclick={() => openMediaBlockInWriteMode(block.id)}>Marco y colores…</button>
+                    {/if}
 
                   {:else if block.blockType === 'SEPARATOR'}
                     <div class="write-separator">{#if parseSeparatorContent(block.contentJson).ornament === 'line'}· · ·{:else}{@html separatorOrnamentSvg(parseSeparatorContent(block.contentJson).ornament)}{/if}</div>
@@ -2639,6 +2702,28 @@
             />
           </div>
 
+          <div class="insp-field insp-field--inline">
+            <label class="insp-label insp-label--inline" for="is-nobg">
+              Sin fondo de página
+              <span class="insp-hint">Quita el fondo del libro (papel, cuadrícula o textura) en esta sección.</span>
+            </label>
+            <input id="is-nobg" type="checkbox" class="insp-checkbox"
+              bind:checked={insp_sNoBackground}
+              onchange={() => { markInspectorDirty(); onInspectorBlur(); }}
+            />
+          </div>
+
+          <div class="insp-field insp-field--inline">
+            <label class="insp-label insp-label--inline" for="is-light">
+              Texto claro
+              <span class="insp-hint">Para portadas o páginas sobre una imagen oscura.</span>
+            </label>
+            <input id="is-light" type="checkbox" class="insp-checkbox"
+              bind:checked={insp_sLightText}
+              onchange={() => { markInspectorDirty(); onInspectorBlur(); }}
+            />
+          </div>
+
           <div class="insp-divider"></div>
 
           <!-- Metadata del sistema -->
@@ -3052,6 +3137,64 @@
             </div>
           {/if}
 
+          {#if insp_bType === 'BADGE'}
+            <div class="insp-field">
+              <label class="insp-label" for="ib-badge-shape">Marco de la etiqueta</label>
+              <select
+                id="ib-badge-shape"
+                class="insp-select"
+                bind:value={insp_bBadgeShape}
+                onchange={() => { markInspectorDirty(); onInspectorBlur(); }}
+              >
+                {#each BADGE_SHAPES as s}
+                  <option value={s}>{badgeShapeLabel(s)}</option>
+                {/each}
+              </select>
+            </div>
+            {#if insp_bBadgeShape !== 'none'}
+              <div class="insp-field insp-field--inline">
+                <label class="insp-label insp-label--inline" for="ib-badge-fill">Relleno</label>
+                <input id="ib-badge-fill" type="color" class="insp-color" bind:value={insp_bBadgeFill}
+                  onchange={() => { markInspectorDirty(); onInspectorBlur(); }} />
+              </div>
+              <div class="insp-field insp-field--inline">
+                <label class="insp-label insp-label--inline" for="ib-badge-stroke">Filete</label>
+                <input id="ib-badge-stroke" type="color" class="insp-color" bind:value={insp_bBadgeStroke}
+                  onchange={() => { markInspectorDirty(); onInspectorBlur(); }} />
+              </div>
+            {/if}
+            <span class="insp-hint">Escribe <code>{'{n}'}</code> en el texto para numerar solas las etiquetas del libro: «Día {'{n}'}» → Día 1, Día 2, Día 3…</span>
+          {/if}
+
+          {#if insp_bType === 'VERSE'}
+            <div class="insp-field">
+              <label class="insp-label" for="ib-verse-ref">Referencia</label>
+              <input
+                id="ib-verse-ref"
+                class="insp-input"
+                type="text"
+                bind:value={insp_bVerseRef}
+                oninput={markInspectorDirty}
+                onblur={onInspectorBlur}
+                placeholder="Ej.: Mateo 4,19"
+              />
+              <span class="insp-hint">El texto del bloque es el versículo (opcional). Si lo dejas vacío, solo se imprime la referencia.</span>
+            </div>
+            <div class="insp-field">
+              <label class="insp-label" for="ib-verse-frame">Filetes</label>
+              <select
+                id="ib-verse-frame"
+                class="insp-select"
+                bind:value={insp_bVerseFrame}
+                onchange={() => { markInspectorDirty(); onInspectorBlur(); }}
+              >
+                {#each VERSE_FRAMES as f}
+                  <option value={f}>{verseFrameLabel(f)}</option>
+                {/each}
+              </select>
+            </div>
+          {/if}
+
           <div class="insp-divider"></div>
           <div class="insp-meta">
             <span class="insp-meta-row"><span class="insp-meta-key">Posición</span><span class="insp-meta-val">#{selectedBlock.orderIndex + 1}</span></span>
@@ -3223,6 +3366,22 @@
                 onchange={() => { markInspectorDirty(); onInspectorBlur(); }}
               />
             </div>
+
+            {#if blockSupportsAnchor(insp_bType)}
+              <div class="insp-field insp-field--inline">
+                <label class="insp-label insp-label--inline" for="ib-anchor">
+                  Anclar al pie de la página
+                  <span class="insp-hint">Queda pegado al final de la caja de texto; lo siguiente empieza en otra página.</span>
+                </label>
+                <input
+                  id="ib-anchor"
+                  type="checkbox"
+                  class="insp-checkbox"
+                  bind:checked={insp_bAnchorBottom}
+                  onchange={() => { markInspectorDirty(); onInspectorBlur(); }}
+                />
+              </div>
+            {/if}
           {/if}
 
           {/if}
@@ -6022,4 +6181,9 @@
   }
   .insp-ornament-preview :global(svg) { height: 22px; width: auto; }
   .write-separator :global(svg) { height: 18px; width: auto; color: currentColor; }
+  .insp-color { width: 44px; height: 26px; padding: 1px; border: 1px solid var(--border, #ddd); border-radius: 6px; background: transparent; cursor: pointer; }
+  .write-block--VERSE, .write-block--BADGE { flex-wrap: wrap; }
+  .write-verse-ref { display: block; flex: 0 0 auto; width: 100%; text-align: center; margin: 2px auto 0; padding: 2px 8px; border: 0; background: transparent; color: inherit; font: inherit; font-size: 12px; font-weight: 600; opacity: 0.75; cursor: pointer; border-radius: 4px; }
+  .write-verse-ref:hover { opacity: 1; background: rgba(127,127,127,0.12); }
+  .write-verse-ref--badge { font-weight: 400; font-size: 11px; opacity: 0.55; }
 </style>

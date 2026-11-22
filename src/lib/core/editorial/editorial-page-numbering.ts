@@ -1,8 +1,8 @@
-import { formatFolio, parseFooterConfig, parseHeaderConfig, resolveHeaderSource } from './page-furniture';
+import { formatFolio, parseFooterConfig, parseHeaderConfig, resolveHeaderSource, type FooterOrnament } from './page-furniture';
 import type { LayoutSettings } from '$lib/core/domain/layout';
 import type { SectionType, DocumentSection } from '$lib/core/domain/section';
 import type { RenderedPage } from './page-layout-model';
-import { resolveSectionEditorialRules } from './section-type-catalog';
+import { parseSectionSettingsOverrides, resolveSectionEditorialRules } from './section-type-catalog';
 
 export type EditorialNumberingScope = 'frontmatter' | 'body' | null;
 
@@ -14,6 +14,8 @@ export interface PageEditorialFrame {
   showPageNumber: boolean;
   headerText: string | null;
   footerText: string | null;
+  /** Ornamento del pie para esta página (null = ninguno). */
+  footerOrnament?: Exclude<FooterOrnament, 'none'> | null;
 }
 
 const NEVER_NUMBERED_SECTION_TYPES = new Set<SectionType | 'BLANK_PAGE'>([
@@ -113,6 +115,23 @@ function shouldShowPageNumber(
   return !hiddenSectionTypes.has(page.primarySectionType);
 }
 
+/**
+ * Ornamento del pie: es decoración, no folio. Va en todas las páginas de texto salvo
+ * portada, contraportada y blancos (y salvo que la sección desactive el pie a mano).
+ * BookPage lo oculta además en composiciones a página completa.
+ */
+function resolveFooterOrnament(
+  page: RenderedPage,
+  section: DocumentSection | undefined,
+  settings: LayoutSettings,
+  ornament: FooterOrnament,
+): Exclude<FooterOrnament, 'none'> | null {
+  if (ornament === 'none' || !settings.showFooter || page.kind !== 'content') return null;
+  if (!page.primarySectionType || NEVER_NUMBERED_SECTION_TYPES.has(page.primarySectionType)) return null;
+  if (section && parseSectionSettingsOverrides(section.settingsJson).allowFooter === false) return null;
+  return ornament;
+}
+
 function resolveHeaderText(
   page: RenderedPage,
   section: DocumentSection | undefined,
@@ -186,6 +205,7 @@ export function buildEditorialFrames(params: {
       showPageNumber,
       headerText,
       footerText,
+      footerOrnament: resolveFooterOrnament(page, section, settings, footerConfig.ornament),
     };
   });
 }

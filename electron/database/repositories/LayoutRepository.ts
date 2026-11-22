@@ -127,6 +127,7 @@ export function updateLayoutSettings(
   if ('footerConfigJson' in input) { fields.push('footer_config_json = ?'); values.push(input.footerConfigJson ?? null); }
   if ('tocConfigJson' in input) { fields.push('toc_config_json = ?'); values.push(input.tocConfigJson ?? null); }
   if ('stylesJson' in input) { fields.push('styles_json = ?'); values.push(input.stylesJson ?? null); }
+  if ('pageBackgroundJson' in input) { fields.push('page_background_json = ?'); values.push(input.pageBackgroundJson ?? null); }
 
   if (fields.length === 0) return existing;
 

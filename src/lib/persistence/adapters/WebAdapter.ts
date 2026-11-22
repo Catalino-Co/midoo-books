@@ -77,6 +77,7 @@ function normalizeWebLayoutSettings(layout: LayoutSettings): LayoutSettings {
     bleedMm: layout.bleedMm ?? 0,
     safeAreaInsetMm: layout.safeAreaInsetMm ?? 0,
     stylesJson: layout.stylesJson ?? null,
+    pageBackgroundJson: layout.pageBackgroundJson ?? null,
   };
 }
 

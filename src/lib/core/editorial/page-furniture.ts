@@ -1,10 +1,12 @@
 /**
- * page-furniture.ts — cabecera (titulillo) y folio.
+ * page-furniture.ts — cabecera (titulillo), folio y ornamento de pie.
  *
  * Se guardan en LayoutSettings.headerConfigJson / footerConfigJson.
  * El motor usa formatFolio() y resolveHeaderSource() para el texto; BookPage usa
  * la posición para alinear (centro o corte exterior: izquierda en par, derecha en impar).
  */
+
+import { separatorOrnamentLabel, type SeparatorOrnament } from './separator-content';
 
 export const FOLIO_STYLES = ['plain', 'dashes', 'dots', 'brackets'] as const;
 export type FolioStyle = (typeof FOLIO_STYLES)[number];
@@ -18,6 +20,15 @@ export type HeaderContent = (typeof HEADER_CONTENTS)[number];
 export interface FooterConfig {
   folioStyle: FolioStyle;
   position: FurniturePosition;
+  /** Ornamento centrado en el pie de cada página de texto ('none' = sin ornamento). */
+  ornament: FooterOrnament;
+}
+
+export type FooterOrnament = 'none' | Exclude<SeparatorOrnament, 'space' | 'line'>;
+export const FOOTER_ORNAMENTS: readonly FooterOrnament[] = ['none', 'laurel', 'flourish', 'diamond', 'asterism', 'dots'];
+
+export function footerOrnamentLabel(o: FooterOrnament): string {
+  return o === 'none' ? 'Sin ornamento' : separatorOrnamentLabel(o);
 }
 
 export interface HeaderConfig {
@@ -27,7 +38,7 @@ export interface HeaderConfig {
   uppercase: boolean;
 }
 
-export const DEFAULT_FOOTER_CONFIG: FooterConfig = { folioStyle: 'plain', position: 'center' };
+export const DEFAULT_FOOTER_CONFIG: FooterConfig = { folioStyle: 'plain', position: 'center', ornament: 'none' };
 export const DEFAULT_HEADER_CONFIG: HeaderConfig = { content: 'section', position: 'center', uppercase: true };
 
 function pick<T extends string>(v: unknown, allowed: readonly T[], fallback: T): T {
@@ -49,6 +60,7 @@ export function parseFooterConfig(json: string | null | undefined): FooterConfig
   return {
     folioStyle: pick(o.folioStyle, FOLIO_STYLES, DEFAULT_FOOTER_CONFIG.folioStyle),
     position:   pick(o.position, FURNITURE_POSITIONS, DEFAULT_FOOTER_CONFIG.position),
+    ornament:   pick(o.ornament, FOOTER_ORNAMENTS, DEFAULT_FOOTER_CONFIG.ornament),
   };
 }
 
@@ -62,7 +74,7 @@ export function parseHeaderConfig(json: string | null | undefined): HeaderConfig
 }
 
 export function serializeFooterConfig(c: FooterConfig): string {
-  return JSON.stringify({ folioStyle: c.folioStyle, position: c.position });
+  return JSON.stringify({ folioStyle: c.folioStyle, position: c.position, ornament: c.ornament });
 }
 
 export function serializeHeaderConfig(c: HeaderConfig): string {

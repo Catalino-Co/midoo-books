@@ -16,6 +16,9 @@ export const BOOK_STYLE_ROLE_VALUES = [
   'TOC_ENTRY',
   'CHAPTER_OPENING_LABEL',
   'CHAPTER_OPENING_TITLE',
+  'BADGE',
+  'VERSE_TEXT',
+  'VERSE_REFERENCE',
 ] as const;
 
 export type BookStyleRole = (typeof BOOK_STYLE_ROLE_VALUES)[number];
@@ -130,6 +133,27 @@ export const BOOK_STYLE_ROLE_CATALOG: BookStyleRoleMeta[] = [
     label: 'Título de apertura de capítulo',
     description: 'Título principal de la apertura de capítulo.',
     sampleText: 'El llamado en la orilla',
+  },
+  {
+    role: 'BADGE',
+    label: 'Etiqueta (Día N)',
+    description: 'Texto de la etiqueta enmarcada que abre cada día o lección. La forma y colores se eligen en el bloque.',
+    sampleText: 'Día 1',
+    blockTypeHint: 'Etiqueta',
+  },
+  {
+    role: 'VERSE_TEXT',
+    label: 'Cita bíblica: texto',
+    description: 'Texto del versículo dentro del bloque «Cita bíblica».',
+    sampleText: '«Venid en pos de mí, y os haré pescadores de hombres.»',
+    blockTypeHint: 'Cita bíblica',
+  },
+  {
+    role: 'VERSE_REFERENCE',
+    label: 'Cita bíblica: referencia',
+    description: 'Referencia (libro, capítulo y versículo) del bloque «Cita bíblica».',
+    sampleText: 'Mateo 4,19',
+    blockTypeHint: 'Cita bíblica',
   },
 ];
 
@@ -336,6 +360,45 @@ export function buildDefaultBookStyles(
       color: null,
       maxWidth: 78,
     },
+    BADGE: {
+      fontSize: Math.round(bodySize * 1.05 * 10) / 10,
+      lineHeight: 1.3,
+      textAlign: 'center',
+      fontWeight: 700,
+      fontFamily: null,
+      letterSpacing: 0.02,
+      textTransform: 'none',
+      marginTop: 2,
+      marginBottom: 14,
+      color: null,
+      maxWidth: null,
+    },
+    VERSE_TEXT: {
+      fontSize: bodySize,
+      lineHeight: Math.min(2.2, bodyLineHeight),
+      textAlign: 'center',
+      fontWeight: 400,
+      fontFamily: null,
+      letterSpacing: 0,
+      textTransform: 'none',
+      marginTop: 0,
+      marginBottom: 4,
+      color: null,
+      maxWidth: 82,
+    },
+    VERSE_REFERENCE: {
+      fontSize: Math.round(bodySize * 1.15 * 10) / 10,
+      lineHeight: 1.3,
+      textAlign: 'center',
+      fontWeight: 700,
+      fontFamily: null,
+      letterSpacing: 0.01,
+      textTransform: 'none',
+      marginTop: 0,
+      marginBottom: 0,
+      color: null,
+      maxWidth: null,
+    },
   };
 }
 
@@ -427,6 +490,8 @@ export function resolveBookStyleRoleForBlock(
     case 'PARAGRAPH': return 'PARAGRAPH';
     case 'QUOTE': return 'QUOTE';
     case 'CENTERED_PHRASE': return 'CENTERED_PHRASE';
+    case 'BADGE': return 'BADGE';
+    case 'VERSE': return 'VERSE_TEXT';
     default: return null;
   }
 }

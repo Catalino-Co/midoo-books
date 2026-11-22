@@ -68,6 +68,9 @@ function typeLayoutDefaults(blockType: BlockType): BlockLayoutStyle {
       return { textAlign: 'left', widthMode: 'medium', emphasis: 'normal' };
     case 'CENTERED_PHRASE':
       return { textAlign: 'center', widthMode: 'narrow', emphasis: 'normal' };
+    case 'BADGE':
+    case 'VERSE':
+      return { textAlign: 'center', widthMode: 'full', emphasis: 'normal' };
     case 'IMAGE':
     case 'CHAPTER_OPENING':
     case 'SEPARATOR':

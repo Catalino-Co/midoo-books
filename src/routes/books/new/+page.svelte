@@ -2,6 +2,8 @@
   import { goto } from '$app/navigation';
   import { createBook } from '$lib/services/books.service';
   import type { BookStatus } from '$lib/core/domain/index';
+  import { BOOK_TEMPLATES, type BookTemplateId } from '$lib/core/editorial/book-templates';
+  import { applyBookTemplate } from '$lib/services/book-templates.service';
 
   // ── Estado del formulario ─────────────────────────────────────────────────
   let title       = $state('');
@@ -10,6 +12,7 @@
   let description = $state('');
   let languageCode = $state('es');
   let status      = $state<BookStatus>('draft');
+  let templateId  = $state<BookTemplateId>('blank');
 
   let saving  = $state(false);
   let error   = $state<string | null>(null);
@@ -33,6 +36,15 @@
         languageCode: languageCode        || undefined,
         status,
       });
+      if (templateId !== 'blank') {
+        await applyBookTemplate(book.id, templateId, {
+          title: title.trim(),
+          subtitle: subtitle.trim(),
+          author: authorName.trim(),
+        });
+        goto(`/books/${book.id}/preview`, { replaceState: true });
+        return;
+      }
       goto(`/books/${book.id}/overview`, { replaceState: true });
     } catch (e) {
       error  = e instanceof Error ? e.message : String(e);
@@ -157,6 +169,23 @@
             </select>
           </div>
         </div>
+
+        <!-- Plantilla -->
+        <fieldset class="field tpl-field">
+          <legend class="field-label">Plantilla</legend>
+          <div class="tpl-grid">
+            {#each BOOK_TEMPLATES as t (t.id)}
+              <label class="tpl-card" class:tpl-card--on={templateId === t.id}>
+                <input type="radio" name="tpl" value={t.id} bind:group={templateId} disabled={saving} />
+                <span class="tpl-name">{t.label}</span>
+                <span class="tpl-desc">{t.description}</span>
+              </label>
+            {/each}
+          </div>
+          {#if templateId !== 'blank'}
+            <p class="tpl-note">Crea el diseño y unas páginas de ejemplo (portada, créditos, capítulos…) que puedes editar o borrar. Al terminar se abre la vista previa.</p>
+          {/if}
+        </fieldset>
 
         <!-- Acciones -->
         <div class="form-actions">
@@ -369,4 +398,21 @@
     flex-shrink: 0;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .tpl-field { border: 0; padding: 0; margin: 0; }
+  .tpl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 4px; }
+  .tpl-card {
+    position: relative;
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 12px 12px 12px 34px;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px;
+    background: rgba(255,255,255,0.03);
+    cursor: pointer;
+  }
+  .tpl-card input { position: absolute; left: 12px; top: 14px; accent-color: #7c6cf0; }
+  .tpl-card--on { border-color: #7c6cf0; background: rgba(124,108,240,0.12); }
+  .tpl-name { font-weight: 600; font-size: 13px; }
+  .tpl-desc { font-size: 11.5px; line-height: 1.4; opacity: 0.7; }
+  .tpl-note { margin: 8px 0 0; font-size: 12px; opacity: 0.7; }
+  @media (max-width: 720px) { .tpl-grid { grid-template-columns: 1fr; } }
 </style>

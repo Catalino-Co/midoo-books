@@ -28,6 +28,8 @@ export const BLOCK_TYPE_VALUES = [
   'SEPARATOR',
   'PAGE_BREAK',
   'CENTERED_PHRASE',
+  'BADGE',
+  'VERSE',
 ] as const;
 
 export type BlockType = (typeof BLOCK_TYPE_VALUES)[number];
@@ -54,6 +56,8 @@ export function normalizeBlockType(raw: string): BlockType {
     centered_phrase: 'CENTERED_PHRASE',
     chapter_opening: 'CHAPTER_OPENING',
     title_page:      'TITLE_PAGE',
+    badge:           'BADGE',
+    verse:           'VERSE',
     heading: 'HEADING_1',
     divider: 'SEPARATOR',
     code: 'PARAGRAPH',

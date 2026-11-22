@@ -21,6 +21,9 @@
  *   v9 — Formato físico: preset, bleed, safe area (PARTE 13)
  *   v10 — styles_json en layout_settings (módulo Estilos)
  *   v11 — export_jobs: CHECK ampliado para pdf_screen, pdf_print, markdown, docx
+ *   v12 — assets: font_family, font_weight, font_style (fuentes propias)
+ *   v13 — layout_settings.hyphenate (guionización)
+ *   v14 — layout_settings.page_background_json (fondo de página)
  */
 
 import type { Database } from 'sql.js';
@@ -796,6 +799,20 @@ const migrations: Migration[] = [
           ('schemaVersion', '13')
       `);
       console.log('[DB] v13: layout_settings — hyphenate.');
+    },
+  },
+
+  // ── v14: fondo de página por libro (papel, cuadrícula o textura) ────────────
+  {
+    version: 14,
+    name: 'layout_page_background',
+    up: (db) => {
+      db.run(`ALTER TABLE layout_settings ADD COLUMN page_background_json TEXT`);
+      db.run(`
+        INSERT OR REPLACE INTO app_settings (key, value) VALUES
+          ('schemaVersion', '14')
+      `);
+      console.log('[DB] v14: layout_settings — page_background_json.');
     },
   },
 

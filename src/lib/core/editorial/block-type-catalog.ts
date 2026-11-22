@@ -7,6 +7,7 @@ import type { BlockType } from '$lib/core/domain/block';
 import { parseImageBlockContent } from './image-block-content';
 import { parseChapterOpeningContent } from './chapter-opening-content';
 import { parseTitlePageContent } from './title-page-content';
+import { parseVerseContent } from './composite-blocks';
 
 export type BlockEditorSurface =
   | 'none'
@@ -31,6 +32,8 @@ export const BLOCK_TYPE_LABELS: Record<BlockType, string> = {
   SEPARATOR:       'Separador',
   PAGE_BREAK:      'Salto de página',
   CENTERED_PHRASE: 'Línea centrada',
+  BADGE:           'Etiqueta (Día N)',
+  VERSE:           'Cita bíblica / referencia',
 };
 
 export const ALL_BLOCK_TYPES: BlockType[] = [
@@ -43,6 +46,8 @@ export const ALL_BLOCK_TYPES: BlockType[] = [
   'PARAGRAPH',
   'QUOTE',
   'CENTERED_PHRASE',
+  'BADGE',
+  'VERSE',
   'IMAGE',
   'SEPARATOR',
   'PAGE_BREAK',
@@ -64,6 +69,10 @@ export function blockEditorSurface(type: BlockType): BlockEditorSurface {
     case 'QUOTE':
       return 'large';
     case 'CENTERED_PHRASE':
+      return 'medium';
+    case 'BADGE':
+      return 'short';
+    case 'VERSE':
       return 'medium';
     case 'CHAPTER_OPENING':
       return 'chapter_opening';
@@ -124,6 +133,8 @@ export function blockTypeIcon(type: BlockType): string {
     SEPARATOR:       'M5 12h14',
     PAGE_BREAK:      'M8 6h8M8 18h8M12 6v12',
     CENTERED_PHRASE: 'M8 12h8M9 8h6M9 16h6',
+    BADGE:           'M3 12l3-5h12l3 5-3 5H6zM9 12h6',
+    VERSE:           'M5 6h14M5 18h14M8 10h8M9 14h6',
   };
   return icons[type] ?? 'M12 5v14M5 12h14';
 }
@@ -150,6 +161,10 @@ export function blockEmptyPreviewHint(type: BlockType): string {
       return 'Texto centrado';
     case 'QUOTE':
       return 'Cita vacía';
+    case 'BADGE':
+      return 'Etiqueta vacía';
+    case 'VERSE':
+      return 'Cita bíblica (sin referencia)';
     default:
       return '— sin texto —';
   }
@@ -184,6 +199,11 @@ export function blockContentPreview(
   if (t === 'TITLE_PAGE') {
     const tp = parseTitlePageContent(block.contentJson ?? null);
     const line = [tp.title.trim(), tp.authorLine.trim()].filter(Boolean).join(' · ');
+    return line ? (line.length > maxLen ? line.slice(0, maxLen) + '…' : line) : blockEmptyPreviewHint(t);
+  }
+  if (t === 'VERSE') {
+    const v = parseVerseContent(block.contentJson ?? null);
+    const line = [block.contentText.replace(/\s+/g, ' ').trim(), v.reference.trim()].filter(Boolean).join(' — ');
     return line ? (line.length > maxLen ? line.slice(0, maxLen) + '…' : line) : blockEmptyPreviewHint(t);
   }
   const text = block.contentText.replace(/\s+/g, ' ').trim();

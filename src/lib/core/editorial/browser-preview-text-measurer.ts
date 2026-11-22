@@ -389,6 +389,19 @@ export class BrowserPreviewTextMeasurer implements LayoutTextMeasurementAdapter 
     return Math.ceil(wrapper.getBoundingClientRect().height);
   }
 
+  /**
+   * Alto (px) de un bloque compuesto (Etiqueta, Cita bíblica): el mismo HTML que
+   * BookPage pinta con {@html}, dentro del mismo envoltorio flow-root.
+   */
+  measureHtml(html: string): number {
+    this.host.innerHTML = '';
+    const wrapper = document.createElement('div');
+    wrapper.style.display = 'flow-root';
+    wrapper.innerHTML = html;
+    this.host.appendChild(wrapper);
+    return Math.ceil(wrapper.getBoundingClientRect().height);
+  }
+
   private tagNameForBlock(blockType: DocumentBlock['blockType']): ReturnType<typeof textBlockTag> {
     return textBlockTag(blockType);
   }

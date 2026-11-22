@@ -28,7 +28,23 @@
     type FolioStyle,
     type FurniturePosition,
     type HeaderContent,
+    FOOTER_ORNAMENTS,
+    footerOrnamentLabel,
+    type FooterOrnament,
   } from '$lib/core/editorial/page-furniture';
+  import { separatorOrnamentSvg } from '$lib/core/editorial/separator-content';
+  import {
+    PAGE_BACKGROUND_KINDS,
+    DEFAULT_PAGE_BACKGROUND,
+    pageBackgroundKindLabel,
+    parsePageBackground,
+    serializePageBackground,
+    type PageBackgroundKind,
+  } from '$lib/core/editorial/page-decoration';
+  import { listAssets, assetDisplayUrl } from '$lib/services/assets.service';
+  import { BOOK_TEMPLATES, type BookTemplateId } from '$lib/core/editorial/book-templates';
+  import { applyTemplateDesign } from '$lib/services/book-templates.service';
+  import type { Asset } from '$lib/core/domain/asset';
 
   let bookId = $derived($page.params.bookId);
 
@@ -50,6 +66,33 @@
   let headerContent = $state<HeaderContent>('section');
   let headerPosition = $state<FurniturePosition>('center');
   let headerUppercase = $state(true);
+  let footerOrnament = $state<FooterOrnament>('none');
+  let bgKind = $state<PageBackgroundKind>('none');
+  let bgColor = $state(DEFAULT_PAGE_BACKGROUND.color);
+  let bgAssetId = $state('');
+  let bgOpacity = $state(1);
+  let bgSkipFullPage = $state(true);
+  let imageAssets = $state<Asset[]>([]);
+  let designTemplate = $state<BookTemplateId>('illustrated-novel');
+  let confirmDesign = $state(false);
+  let applyingDesign = $state(false);
+
+  async function applyDesign() {
+    if (!confirmDesign) { confirmDesign = true; return; }
+    applyingDesign = true;
+    error = null;
+    try {
+      await applyTemplateDesign(bookId, designTemplate);
+      confirmDesign = false;
+      await loadData();
+      saveOk = true;
+      setTimeout(() => { saveOk = false; }, 2200);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      applyingDesign = false;
+    }
+  }
   let hyphenate = $state(false);
   let hiddenTypes = $state<SectionType[]>([...DEFAULT_HIDE_PAGE_NUMBER_SECTION_TYPES]);
   let tocShowTitle = $state(true);
@@ -78,10 +121,18 @@
     loading = true;
     error = null;
     try {
-      const [layout, bookSections] = await Promise.all([
+      const [layout, bookSections, assets] = await Promise.all([
         getLayoutSettings(bookId),
         listSections(bookId),
+        listAssets(bookId).catch(() => [] as Asset[]),
       ]);
+      imageAssets = assets.filter(a => a.assetType !== 'font' && (a.mimeType ?? '').startsWith('image/'));
+      const bg = parsePageBackground(layout.pageBackgroundJson);
+      bgKind = bg.kind;
+      bgColor = bg.color;
+      bgAssetId = bg.assetId ?? '';
+      bgOpacity = bg.opacity;
+      bgSkipFullPage = bg.skipFullPage;
       sections = [...bookSections].sort((a, b) => a.orderIndex - b.orderIndex);
       showPageNumbers = layout.showPageNumbers;
       frontmatterStyle = layout.frontmatterNumberingStyle;
@@ -92,6 +143,7 @@
       const footerCfg = parseFooterConfig(layout.footerConfigJson);
       folioStyle = footerCfg.folioStyle;
       folioPosition = footerCfg.position;
+      footerOrnament = footerCfg.ornament;
       const headerCfg = parseHeaderConfig(layout.headerConfigJson);
       headerContent = headerCfg.content;
       headerPosition = headerCfg.position;
@@ -172,7 +224,14 @@
         hideNumberOnSectionTypes: JSON.stringify(hiddenTypes),
         showFooter,
         showHeader,
-        footerConfigJson: serializeFooterConfig({ folioStyle, position: folioPosition }),
+        footerConfigJson: serializeFooterConfig({ folioStyle, position: folioPosition, ornament: footerOrnament }),
+        pageBackgroundJson: serializePageBackground({
+          kind: bgKind,
+          color: bgColor,
+          assetId: bgAssetId || null,
+          opacity: Math.min(1, Math.max(0.05, Number(bgOpacity) || 1)),
+          skipFullPage: bgSkipFullPage,
+        }),
         headerConfigJson: serializeHeaderConfig({ content: headerContent, position: headerPosition, uppercase: headerUppercase }),
         hyphenate,
         tocConfigJson: serializeLayoutTocConfig({
@@ -380,13 +439,27 @@
 
         <label class="toggle-row">
           <span>
-            <strong>Mostrar folio (número de página)</strong>
-            <small>Se dibuja en el margen inferior; no resta espacio al texto.</small>
+            <strong>Mostrar pie de página</strong>
+            <small>Folio y ornamento en el margen inferior; no restan espacio al texto. El número solo aparece si la numeración editorial está activa.</small>
           </span>
           <input type="checkbox" bind:checked={showFooter} />
         </label>
 
         {#if showFooter}
+          <div class="field">
+            <label for="footer-orn">Ornamento del pie</label>
+            <div class="orn-row">
+              <select id="footer-orn" class="input" bind:value={footerOrnament}>
+                {#each FOOTER_ORNAMENTS as o}
+                  <option value={o}>{footerOrnamentLabel(o)}</option>
+                {/each}
+              </select>
+              {#if footerOrnament !== 'none'}
+                <span class="orn-preview" aria-hidden="true">{@html separatorOrnamentSvg(footerOrnament)}</span>
+              {/if}
+            </div>
+            <p class="field-help">Se repite centrado al pie de cada página de texto (no en portada, aperturas ni imágenes a sangre). Deja al menos 18 mm de margen inferior.</p>
+          </div>
           <div class="field">
             <label for="folio-style">Estilo del folio</label>
             <select id="folio-style" class="input" bind:value={folioStyle}>
@@ -441,6 +514,62 @@
       </section>
 
       <section class="panel">
+        <h2 class="panel-title">Fondo de página</h2>
+        <div class="field">
+          <label for="bg-kind">Fondo</label>
+          <select id="bg-kind" class="input" bind:value={bgKind}>
+            {#each PAGE_BACKGROUND_KINDS as k}
+              <option value={k}>{pageBackgroundKindLabel(k)}</option>
+            {/each}
+          </select>
+        </div>
+        {#if bgKind === 'paper' || bgKind === 'grid'}
+          <div class="field">
+            <label for="bg-color">Color del papel</label>
+            <div class="orn-row">
+              <input id="bg-color" class="input input--color" type="color" bind:value={bgColor} />
+              <span class="field-help">{bgColor}</span>
+            </div>
+          </div>
+        {/if}
+        {#if bgKind === 'image'}
+          <div class="field">
+            <label for="bg-asset">Imagen del libro</label>
+            {#if imageAssets.length === 0}
+              <p class="field-help">Este libro aún no tiene imágenes. Súbela en «Recursos» (una textura de papel, acuarela…).</p>
+            {:else}
+              <select id="bg-asset" class="input" bind:value={bgAssetId}>
+                <option value="">— Elegir imagen —</option>
+                {#each imageAssets as a (a.id)}
+                  <option value={a.id}>{a.originalName}</option>
+                {/each}
+              </select>
+              {#if bgAssetId}
+                {@const a = imageAssets.find(x => x.id === bgAssetId)}
+                {#if a}<img class="bg-thumb" src={assetDisplayUrl(bookId, a.storagePath)} alt="" />{/if}
+              {/if}
+            {/if}
+          </div>
+        {/if}
+        {#if bgKind === 'image' || bgKind === 'grid'}
+          <div class="field">
+            <label for="bg-op">{bgKind === 'grid' ? 'Intensidad de la cuadrícula' : 'Opacidad de la imagen'} ({Math.round(bgOpacity * 100)} %)</label>
+            <input id="bg-op" type="range" min="0.05" max="1" step="0.05" bind:value={bgOpacity} />
+          </div>
+        {/if}
+        {#if bgKind !== 'none'}
+          <label class="toggle-row">
+            <span>
+              <strong>Omitir en páginas a sangre</strong>
+              <small>No dibuja el fondo bajo aperturas e imágenes a página completa.</small>
+            </span>
+            <input type="checkbox" bind:checked={bgSkipFullPage} />
+          </label>
+          <p class="field-help">Va a sangre en el PDF de imprenta. Una sección puede quitarlo desde su inspector (pestaña Sección). No se exporta al EPUB.</p>
+        {/if}
+      </section>
+
+      <section class="panel">
         <h2 class="panel-title">Tipografía</h2>
         <label class="toggle-row">
           <span>
@@ -480,6 +609,27 @@
           </span>
           <input type="checkbox" bind:checked={tocShowDotLeaders} />
         </label>
+      </section>
+
+      <section class="panel panel--wide">
+        <h2 class="panel-title">Aplicar el diseño de una plantilla</h2>
+        <p class="panel-lead">
+          Cambia tamaño de página, márgenes, tipografía, estilos, pie y fondo por los de la plantilla. Tu contenido no se toca.
+        </p>
+        <div class="orn-row">
+          <select class="input" bind:value={designTemplate} onchange={() => { confirmDesign = false; }}>
+            {#each BOOK_TEMPLATES.filter(t => t.id !== 'blank') as t (t.id)}
+              <option value={t.id}>{t.label}</option>
+            {/each}
+          </select>
+          <button class="btn {confirmDesign ? 'btn--primary' : 'btn--ghost'}" type="button" onclick={() => void applyDesign()} disabled={applyingDesign}>
+            {applyingDesign ? 'Aplicando…' : confirmDesign ? 'Sí, sustituir mi diseño' : 'Aplicar diseño'}
+          </button>
+          {#if confirmDesign && !applyingDesign}
+            <button class="btn btn--ghost" type="button" onclick={() => { confirmDesign = false; }}>Cancelar</button>
+          {/if}
+        </div>
+        <p class="field-help">{BOOK_TEMPLATES.find(t => t.id === designTemplate)?.description}</p>
       </section>
 
       <section class="panel panel--wide">
@@ -759,4 +909,10 @@
     opacity: 0.55;
     cursor: default;
   }
+  .orn-row { display: flex; align-items: center; gap: 10px; }
+  .orn-row .input { flex: 1; }
+  .orn-preview { display: inline-flex; color: inherit; opacity: 0.85; }
+  .orn-preview :global(svg) { height: 18px; width: auto; }
+  .input--color { flex: 0 0 56px !important; padding: 2px; height: 32px; }
+  .bg-thumb { display: block; margin-top: 8px; max-width: 100%; max-height: 90px; border-radius: 6px; border: 1px solid rgba(0,0,0,0.12); }
 </style>

@@ -16,6 +16,7 @@
  */
 
 import type { DocumentBlock } from '$lib/core/domain/block';
+import { parseVerseContent } from './composite-blocks';
 import type { DocumentSection } from '$lib/core/domain/section';
 import type { BookProject } from '$lib/core/domain/book';
 
@@ -54,6 +55,15 @@ export function blockToMarkdown(block: DocumentBlock): string {
     case 'CENTERED_PHRASE':   return `<center>${text}</center>`;
     case 'SEPARATOR':         return '---';
     case 'PAGE_BREAK':        return '<!-- pagebreak -->';
+    case 'BADGE':             return `<center>**${text}**</center>`;
+
+    case 'VERSE': {
+      const ref = parseVerseContent(block.contentJson).reference.trim();
+      const out: string[] = [];
+      if (text) out.push(...text.split('\n').map(line => `> *${line}*`));
+      if (ref) out.push(out.length ? '>' : '', `> **${ref}**`);
+      return out.filter((l, i) => l !== '' || i > 0).join('\n') || '>';
+    }
 
     case 'QUOTE': {
       if (!text) return '>';
