@@ -112,6 +112,7 @@ midoo-books/
 ├── electron/                    ← Proceso principal Electron
 │   ├── main/
 │   │   ├── index.ts             BrowserWindow, ciclo de vida
+│   │   ├── app-protocol.ts     protocolo app://midoo/ (UI en producción)
 │   │   └── register-media-protocol.ts  protocolo midoo-media://
 │   ├── preload/
 │   │   └── index.ts             contextBridge → window.electronAPI
@@ -328,7 +329,23 @@ exportPdf(bookId, format)
 
 ---
 
-## 9. Protocolo de media local
+## 9. Protocolos propios
+
+### 9.1 `app://midoo/` — UI en producción
+
+En producción (o con `MIDOO_LOAD_BUILD=1`) la ventana carga `app://midoo/` en lugar de
+`loadFile('build/index.html')`. El fallback SPA de adapter-static (`build/200.html`) usa
+rutas absolutas (`/_app/...`) que bajo `file://` apuntan a la raíz del disco y dejaban la
+ventana en blanco.
+
+- Implementado en `electron/main/app-protocol.ts` (`registerAppProtocol`, `resolveAppRequest`).
+- Archivos existentes en `build/` → se sirven tal cual (MIME por extensión, lectura desde ASAR).
+- Rutas sin extensión (`/library`, `/books/{id}/content`, recargas) → `200.html`; el router de SvelteKit resuelve en cliente.
+- Recursos con extensión inexistentes → 404. Intentos de salir de `build/` → 403.
+- `window.location.origin` es `app://midoo`, base estable para la ruta `export-render`.
+- `protocol.registerSchemesAsPrivileged` solo admite UNA llamada: todos los esquemas se declaran juntos en `electron/main/index.ts`.
+
+### 9.2 `midoo-media://` — media local
 
 Las imágenes del libro se sirven con un protocolo personalizado de Electron:
 

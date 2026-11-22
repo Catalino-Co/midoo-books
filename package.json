@@ -9,6 +9,8 @@
     "dev:electron": "cross-env NODE_ENV=development electron .",
     "dev": "npm run build:electron && concurrently --kill-others -n \"web,electron\" -c \"cyan,yellow\" \"npm run dev:web\" \"wait-on http://localhost:5178 && npm run dev:electron\"",
     "build": "vite build && npm run build:electron",
+    "start:build": "npm run build && cross-env MIDOO_LOAD_BUILD=1 electron .",
+    "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder --win",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
@@ -43,6 +45,10 @@
     "appId": "com.midoo.books",
     "productName": "MIDOO Books",
     "copyright": "Copyright © 2026 MIDOO",
+    "directories": {
+      "output": "release",
+      "buildResources": "resources"
+    },
     "files": [
       "build/**/*",
       "dist-electron/**/*"

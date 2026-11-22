@@ -20,8 +20,12 @@ import { join } from 'path';
 import { openDatabase, closeDatabase } from '../database/connection';
 import { registerAllHandlers } from '../ipc/index';
 import { registerMidooMediaProtocol } from './register-media-protocol';
+import { APP_ORIGIN, APP_SCHEME_PRIVILEGES, registerAppProtocol } from './app-protocol';
 
+// registerSchemesAsPrivileged solo puede llamarse UNA vez y antes de app.ready:
+// todos los esquemas propios deben declararse aquí.
 protocol.registerSchemesAsPrivileged([
+  APP_SCHEME_PRIVILEGES,
   {
     scheme:     'midoo-media',
     privileges: {
@@ -33,8 +37,12 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-// Detectar si estamos en modo desarrollo
-const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+// Modo de carga de la UI:
+//   - Desarrollo (sin empaquetar): servidor de Vite en DEV_URL.
+//   - Producción (empaquetada) o MIDOO_LOAD_BUILD=1: build estático vía app://midoo/.
+//     MIDOO_LOAD_BUILD=1 permite probar el build sin empaquetar (`npm run start:build`).
+const loadFromBuild = app.isPackaged || process.env.MIDOO_LOAD_BUILD === '1';
+const isDev = !loadFromBuild;
 
 // URL del servidor de desarrollo de Vite
 const DEV_URL = 'http://localhost:5178';
@@ -71,8 +79,9 @@ function createWindow(): void {
     mainWindow.loadURL(DEV_URL);
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    // En producción: cargar el build estático de SvelteKit
-    mainWindow.loadFile(join(app.getAppPath(), 'build', 'index.html'));
+    // En producción: build estático de SvelteKit servido por el protocolo app://
+    // (ver app-protocol.ts — loadFile() deja la ventana en blanco).
+    mainWindow.loadURL(`${APP_ORIGIN}/`);
   }
 
   // Mostrar la ventana cuando el contenido esté listo.
@@ -121,7 +130,12 @@ app.whenReady().then(async () => {
   // 3. Protocolo local para servir imágenes del libro (PARTE 8)
   registerMidooMediaProtocol();
 
-  // 4. Crear la ventana principal
+  // 4. Protocolo app:// para servir la UI desde el build estático
+  if (!isDev) {
+    registerAppProtocol();
+  }
+
+  // 5. Crear la ventana principal
   createWindow();
 
   // macOS: re-crear ventana al hacer clic en el ícono del dock

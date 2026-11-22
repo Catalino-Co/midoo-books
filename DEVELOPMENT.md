@@ -28,6 +28,8 @@ npm install
 | `npm run build:electron` | Compila TypeScript de Electron → `dist-electron/` |
 | `npm run dev:electron` | Inicia Electron (requiere servidor web activo) |
 | `npm run build` | Build completo (SvelteKit + Electron bundles) |
+| `npm run start:build` | Build completo y abre Electron cargando el build vía `app://midoo/` (como en producción) |
+| `npm run pack` | Build + app empaquetada sin instalador en `release/` (para pruebas rápidas) |
 | `npm run dist` | Genera instalador .exe para Windows |
 | `npm run typecheck` | Verifica tipos TypeScript del App Shell |
 
