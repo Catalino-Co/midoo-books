@@ -27,7 +27,7 @@ mkdirSync(outdir, { recursive: true });
 const shared = {
   bundle: true,
   platform: 'node',
-  target: 'node20',    // Electron 31 usa Node.js 20.x
+  target: 'node22',    // Electron 45 incluye Node.js 24.x; node22 es un mínimo seguro
   format: 'cjs',
   // Marcar TODOS los paquetes de node_modules como externos.
   // Se cargarán desde el directorio node_modules en tiempo de ejecución.

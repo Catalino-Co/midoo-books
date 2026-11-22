@@ -4,13 +4,47 @@
 
 - Node.js 18+ (probado con v24.12.0)
 - npm 9+
-- Windows 10/11 x64 (para el build de distribución)
+- Windows 10/11 x64 o macOS (Apple Silicon o Intel)
 
 ## Instalación
 
 ```bash
 npm install
 ```
+
+### Cambiar de equipo (Windows ↔ macOS)
+
+`node_modules/` **no es portable** entre sistemas: esbuild, rollup y Electron descargan
+binarios nativos de la plataforma donde se instalaron. Una carpeta copiada desde Windows
+solo trae `@esbuild/win32-x64`, `@rollup/rollup-win32-*` y no trae el ejecutable de Electron
+para macOS. Al clonar o copiar el proyecto en otro sistema:
+
+```bash
+npm ci          # borra node_modules/ y reinstala según package-lock.json
+npm run dev     # compila Electron, levanta Vite y abre la app
+```
+
+> `npm run dev:electron` por sí solo **no** levanta Vite ni compila `dist-electron/`;
+> úsalo solo si ya tienes `npm run dev:web` corriendo en otra terminal y has ejecutado
+> `npm run build:electron`.
+
+> **macOS: «Electron.app contiene malware» / `spawn … Electron ENOENT`.** macOS 26 marca como
+> malware el binario de Electron 31.7.7, lo mueve a la Papelera y `npm run dev` falla con
+> `ENOENT`. Es un falso positivo ligado a esa versión (fuera de soporte); desde noviembre de 2026
+> el proyecto usa Electron 45. Si vuelve a ocurrir: `npm install` para descargar de nuevo el binario.
+
+**Llevar tus libros al nuevo equipo.** La base de datos y las imágenes viven fuera del repo,
+en la carpeta de datos de usuario (`app.getPath('userData')`):
+
+| Sistema | Carpeta |
+|---|---|
+| Windows | `%APPDATA%\midoo-books\` |
+| macOS | `~/Library/Application Support/midoo-books/` |
+| Linux | `~/.config/midoo-books/` |
+
+Copia `midoo-books.db` y la carpeta `books/` (imágenes por libro) de la carpeta de origen a
+la de destino **con la app cerrada**. Las rutas de imágenes se guardan relativas
+(`media/archivo.jpg`), así que funcionan sin cambios en el otro sistema.
 
 > **Nota sobre sql.js**: el proyecto usa `sql.js` (SQLite en WASM puro) en lugar de
 > `better-sqlite3` para evitar la necesidad de herramientas de compilación nativa
@@ -31,6 +65,7 @@ npm install
 | `npm run start:build` | Build completo y abre Electron cargando el build vía `app://midoo/` (como en producción) |
 | `npm run pack` | Build + app empaquetada sin instalador en `release/` (para pruebas rápidas) |
 | `npm run dist` | Genera instalador .exe para Windows |
+| `npm run dist:mac` | Genera `.dmg` para macOS (arm64 + x64, sin firmar). Debe ejecutarse en una Mac |
 | `npm run typecheck` | Verifica tipos TypeScript del App Shell |
 
 ---
